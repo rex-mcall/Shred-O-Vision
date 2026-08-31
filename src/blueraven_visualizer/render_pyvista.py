@@ -18,6 +18,7 @@ from .io import load_blueraven
 from .quaternion import quat_rotmat, align_rotation, nose_vec
 from .mesh import rocket_primitive
 from .events import nearest, detect_shred
+from .report import build_report
 
 try:
     import pyvista as pv
@@ -81,7 +82,7 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     accel_mag = np.linalg.norm(acc, axis=1)
     gyro_mag = np.linalg.norm(np.c_[hc("Gyro_X"), hc("Gyro_Y"), hc("Gyro_Z")], axis=1)
     tShred, gPk, _ = detect_shred(t_hr, accel_mag)
-    print(f"Shred (peak accel): T+{tShred:.2f}s, {gPk:.0f} g")
+    print(build_report(t_hr, accel_mag, gyro_mag))
 
     if window == "shred":
         win = (tShred - pad, tShred + pad)

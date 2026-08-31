@@ -21,6 +21,7 @@ from .io import load_blueraven
 from .quaternion import quat_rotmat, align_rotation, nose_vec
 from .mesh import load_obj, rocket_primitive, decimate_mesh
 from .events import first_true_time, nearest, detect_shred
+from .report import build_report
 
 BASE_COLOR = (0.78, 0.80, 0.90)
 SHRED_COLOR = (0.85, 0.06, 0.10)
@@ -48,6 +49,7 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     tShred, gPk, iSh = detect_shred(t_hr, accel_mag)
     events = {"shred": tShred}
 
+    lc = None
     if has_lr:
         _, lc = load_blueraven(lr_csv)
         t_lr = lc("Flight_Time_(s)")
@@ -64,7 +66,8 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             "apo fire": first_true_time(t_lr, lc("Apo_fired") > 0.5),
             "main fire": first_true_time(t_lr, lc("Main_fired") > 0.5),
         })
-    print(f"Shred (peak accel): T+{tShred:.2f}s, {gPk:.0f} g")
+
+    print(build_report(t_hr, accel_mag, gyro_mag, t_lr=(t_lr if has_lr else None), lc=lc))
 
     # ---- playback window ----
     t_win_src = t_lr if has_lr else t_hr
@@ -228,29 +231,52 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         print(f"Saved {record}  ({len(frame_times)} frames, {dur:.1f}s)")
         return record
 
-    # interactive: slider + play/pause
+    # interactive: slider + play/pause/step/restart, with keyboard shortcuts
     from matplotlib.widgets import Slider, Button
-    sax = fig.add_axes([0.08, 0.06, 0.72, 0.022])
-    bax = fig.add_axes([0.83, 0.05, 0.10, 0.04])
+    sax = fig.add_axes([0.08, 0.02, 0.84, 0.022])
+    rax = fig.add_axes([0.08, 0.065, 0.14, 0.035])
+    lax = fig.add_axes([0.23, 0.065, 0.09, 0.035])
+    pax = fig.add_axes([0.33, 0.065, 0.12, 0.035])
+    nax = fig.add_axes([0.46, 0.065, 0.09, 0.035])
     sld = Slider(sax, "t (s)", win[0], win[1], valinit=win[0])
-    btn = Button(bax, "Play")
+    btn_restart = Button(rax, "|<< Restart")
+    btn_prev = Button(lax, "Step <")
+    btn_play = Button(pax, "Play")
+    btn_next = Button(nax, "Step >")
+
+    n_frames = len(frame_times)
     state = {"playing": False, "anim": None, "i": 0}
     anim_artists = ([mesh, hud] if show_3d else []) + cursors
     # blitting on a 3D axis can fail to reproject the mesh; only blit in 2D-only mode
     use_blit = blit and not show_3d
 
+    def sync_slider(i):
+        sld.eventson = False
+        sld.set_val(frame_times[i])
+        sld.eventson = True
+
+    def goto(i):
+        i = max(0, min(i, n_frames - 1))
+        state["i"] = i
+        draw(frame_times[i])
+        sync_slider(i)
+        fig.canvas.draw_idle()
+
     def on_slider(val):
+        state["i"] = nearest(frame_times, val)
         draw(val)
         fig.canvas.draw_idle()
     sld.on_changed(on_slider)
 
     def step(_):
         i = state["i"]
-        if i >= len(frame_times):
+        if i >= n_frames - 1:
             stop()
             return anim_artists
         state["i"] = i + 1
-        return draw(frame_times[i])
+        artists = draw(frame_times[state["i"]])
+        sync_slider(state["i"])
+        return artists
 
     def stop():
         if state["anim"] is not None:
@@ -263,30 +289,58 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             for a in anim_artists:
                 a.set_animated(False)
         state["playing"] = False
-        btn.label.set_text("Play")
-        j = min(state["i"], len(frame_times) - 1)
-        draw(frame_times[j])
-        sld.eventson = False
-        sld.set_val(frame_times[j])
-        sld.eventson = True
+        btn_play.label.set_text("Play")
         fig.canvas.draw_idle()
 
-    def toggle(_):
+    def play():
         from matplotlib.animation import FuncAnimation
         if state["playing"]:
-            stop()
             return
+        if state["i"] >= n_frames - 1:
+            state["i"] = 0
         state["playing"] = True
-        btn.label.set_text("Pause")
-        state["i"] = nearest(frame_times, sld.val)
+        btn_play.label.set_text("Pause")
         if use_blit:
             for a in anim_artists:
                 a.set_animated(True)
         state["anim"] = FuncAnimation(fig, step, interval=1000 / fps,
                                       blit=use_blit, cache_frame_data=False)
         fig.canvas.draw_idle()
-    btn.on_clicked(toggle)
 
-    print("Controls: drag slider to scrub, Play/Pause to animate.")
+    def toggle_play(_=None):
+        stop() if state["playing"] else play()
+    btn_play.on_clicked(toggle_play)
+
+    def restart(_=None):
+        stop()
+        goto(0)
+    btn_restart.on_clicked(restart)
+
+    def step_prev(_=None):
+        stop()
+        goto(state["i"] - 1)
+    btn_prev.on_clicked(step_prev)
+
+    def step_next(_=None):
+        stop()
+        goto(state["i"] + 1)
+    btn_next.on_clicked(step_next)
+
+    def on_key(event):
+        if event.key == " ":
+            toggle_play()
+        elif event.key == "right":
+            step_next()
+        elif event.key == "left":
+            step_prev()
+        elif event.key in ("r", "home"):
+            restart()
+        elif event.key == "end":
+            stop()
+            goto(n_frames - 1)
+    fig.canvas.mpl_connect("key_press_event", on_key)
+
+    print("Controls: Play/Pause or SPACE | drag slider to scrub | "
+          "Step</Step> or LEFT/RIGHT arrows | Restart or R/Home | End = last frame")
     plt.show()
     return fig

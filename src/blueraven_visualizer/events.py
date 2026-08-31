@@ -19,3 +19,11 @@ def detect_shred(t_hr, accel_mag):
     Returns (time, peak_g, index)."""
     i = int(np.argmax(accel_mag))
     return float(t_hr[i]), float(accel_mag[i]), i
+
+
+def detect_tumble_onset(t_hr, gyro_mag):
+    """Tumble onset: the peak angular rate. Distinct from detect_shred - a
+    rocket can start tumbling slightly before or after peak acceleration.
+    Returns (time, peak_deg_per_s, index)."""
+    i = int(np.argmax(gyro_mag))
+    return float(t_hr[i]), float(gyro_mag[i]), i
