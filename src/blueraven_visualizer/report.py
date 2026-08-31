@@ -1,8 +1,9 @@
 """Console flight report, ported from blueraven_visualizer.m's console output.
 
 Summarizes the key events (liftoff, burnout, max velocity/Mach, peak
-altitude, shred, tumble onset, apogee, drogue/main fire) and, when the
-pattern matches, prints a one-line diagnosis heuristic.
+altitude, shred, tumble onset, apogee, drogue/main fire). This reports the
+data only - no diagnosis/interpretation is printed; that judgment call is
+left to the person reading it.
 """
 
 import numpy as np
@@ -76,11 +77,6 @@ def build_report(t_hr, accel_mag, gyro_mag, *, t_lr=None, lc=None):
         _rep(lines, "Drogue/Apo fired", tApoF)
         _rep(lines, "Main fired", tMainF)
 
-    lines.append(_RULE)
-    if (tBurn is not None and not np.isnan(tBurn) and not np.isnan(tShred)
-            and abs(tShred - tBurn) < 1 and machMax is not None and machMax > 0.9):
-        lines.append("  DIAGNOSIS: failure at/near burnout in the transonic")
-        lines.append("             regime - classic max-load airframe shred.")
     lines.append(_RULE)
 
     return "\n".join(lines)

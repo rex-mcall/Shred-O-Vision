@@ -15,10 +15,11 @@ dependencies = [
     "pandas>=2.0",
     "matplotlib>=3.7",
     "pillow>=9.0",
+    "imageio-ffmpeg>=0.4",
 ]
 
 [project.optional-dependencies]
-pyvista = ["pyvista>=0.44", "vtk>=9.2", "imageio>=2.30", "imageio-ffmpeg>=0.4"]
+pyvista = ["pyvista>=0.44", "vtk>=9.2", "imageio>=2.30"]
 dev = ["pytest>=7.0"]
 
 [project.scripts]

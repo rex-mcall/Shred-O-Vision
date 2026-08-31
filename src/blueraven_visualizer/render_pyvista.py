@@ -5,18 +5,20 @@ Optional dependency (`pip install blueraven-visualizer[pyvista]`). Scope is
 deliberately narrower than the matplotlib backend: this gives the
 best-looking 3D orientation view - with real per-part textures, via VTK's own
 OBJ+MTL importer, which is what the matplotlib backend's hand-rolled
-`mesh.load_obj()` can't do (no vt/usemtl/mtllib support) - in its own window.
-It does not embed the multi-panel telemetry dashboard; use --renderer
-matplotlib (the default) for that.
+`mesh.load_obj()` can't do (no vt/usemtl/mtllib support) - in its own window,
+with wall-clock-paced play/pause (SPACE), step (arrow keys), and scrub
+(slider). It does not embed the multi-panel telemetry dashboard; use
+--renderer matplotlib (the default) for that.
 """
 
 import os
+import time
 import numpy as np
 
 from .dialogs import ASK, resolve_files
 from .io import load_blueraven
 from .quaternion import quat_rotmat, align_rotation, nose_vec
-from .mesh import rocket_primitive
+from .mesh import rocket_primitive, glyph_face_colors
 from .events import nearest, detect_shred
 from .report import build_report
 
@@ -103,14 +105,22 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         actors = _load_textured_actors(plotter, obj)
         textured = bool(actors)
 
-    poly = base_points = None
+    poly = base_points = face_colors_normal = face_colors_shred = None
     if not textured:
-        V, F = rocket_primitive()
+        V, F, parts = rocket_primitive()
         V = V - V.mean(0)
         V = (align_rotation(nose_vec(model_nose), [1, 0, 0]) @ V.T).T
         faces = np.hstack([np.full((len(F), 1), 3), F]).astype(np.int64)
         poly = pv.PolyData(V, faces)
-        actor = plotter.add_mesh(poly, color=BASE_COLOR, smooth_shading=True)
+        face_colors_normal = (glyph_face_colors(parts) * 255).astype(np.uint8)
+        face_colors_shred = (glyph_face_colors(parts, highlight=SHRED_COLOR) * 255).astype(np.uint8)
+        poly.cell_data["colors"] = face_colors_normal
+        # smooth_shading=True would make add_mesh bind the actor to an
+        # internally-generated normals copy instead of this PolyData, so the
+        # per-frame poly.points/cell_data mutations in apply_pose() below
+        # would silently stop reaching the screen. Flat shading suits the
+        # glyph's faceted panels anyway.
+        actor = plotter.add_mesh(poly, scalars="colors", rgb=True, smooth_shading=False)
         actors = [actor]
         base_points = V.copy()
         center = np.zeros(3)
@@ -122,7 +132,8 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     Rworld = align_rotation(v0, [0, 0, 1]) if upright_start else np.eye(3)
 
     plotter.camera_position = "iso"
-    plotter.camera.zoom(1.2)
+    plotter.reset_camera()
+    plotter.camera.zoom(0.85)   # headroom margin - better to show empty space than crop the model
     plotter.add_text("", position="upper_left", font_size=12, name="hud")
 
     def apply_pose(tf):
@@ -135,7 +146,8 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
                 a.SetUserTransform(transform)
         else:
             poly.points = (R @ base_points.T).T
-            actors[0].GetProperty().SetColor(*(SHRED_COLOR if (post and shred_highlight) else BASE_COLOR))
+            poly.cell_data["colors"] = (face_colors_shred if (post and shred_highlight)
+                                        else face_colors_normal)
         tilt_now = np.degrees(np.arccos(
             np.clip(np.dot(quat_rotmat(Q[ih]) @ [1, 0, 0], v0), -1, 1)))
         plotter.add_text(
@@ -161,6 +173,55 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         print(f"Saved {record}  ({len(frame_times)} frames, {len(frame_times) / fps:.1f}s)")
         return record
 
-    plotter.add_slider_widget(apply_pose, [win[0], win[1]], value=win[0], title="t (s)")
+    # ---- interactive: slider + spacebar play/pause + step/restart keys ----
+    # Paced to elapsed wall-clock time (scaled by `speed`), same approach as
+    # the matplotlib backend: playback tracks real time even if a given
+    # frame's render takes longer than its nominal slot.
+    state = {"playing": False, "t": win[0], "wall_t0": 0.0, "data_t0": win[0]}
+
+    def set_pose(tf):
+        tf = max(win[0], min(win[1], tf))
+        apply_pose(tf)
+        state["t"] = tf
+        return tf
+
+    def toggle_play():
+        if state["playing"]:
+            state["playing"] = False
+        else:
+            state["playing"] = True
+            state["wall_t0"] = time.perf_counter()
+            state["data_t0"] = win[0] if state["t"] >= win[1] else state["t"]
+
+    def timer_tick(step):
+        if not state["playing"]:
+            return
+        elapsed = time.perf_counter() - state["wall_t0"]
+        target_t = state["data_t0"] + elapsed * speed
+        if target_t >= win[1]:
+            state["playing"] = False
+            set_pose(win[1])
+            return
+        set_pose(target_t)
+
+    def step_frame(delta_t):
+        state["playing"] = False
+        set_pose(state["t"] + delta_t)
+
+    def restart():
+        state["playing"] = False
+        set_pose(win[0])
+
+    plotter.add_slider_widget(set_pose, [win[0], win[1]], value=win[0], title="t (s)")
+    plotter.add_key_event("space", toggle_play)
+    plotter.add_key_event("Right", lambda: step_frame(speed / fps))
+    plotter.add_key_event("Left", lambda: step_frame(-speed / fps))
+    plotter.add_key_event("r", restart)
+    plotter.add_key_event("Home", restart)
+    plotter.add_key_event("End", lambda: set_pose(win[1]))
+    plotter.add_timer_event(max_steps=10_000_000, duration=20, callback=timer_tick)
+
+    print("Controls: SPACE play/pause | drag slider to scrub | "
+          "LEFT/RIGHT arrows step | R/Home restart | End = last frame")
     plotter.show()
     return plotter

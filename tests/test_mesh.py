@@ -1,8 +1,11 @@
 import os
 
 import numpy as np
+import pytest
 
-from blueraven_visualizer.mesh import load_obj, rocket_primitive, decimate_mesh
+from blueraven_visualizer.mesh import (
+    load_obj, rocket_primitive, decimate_mesh, glyph_face_colors, GLYPH_COLORS,
+)
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -18,14 +21,29 @@ def test_load_obj_quad_and_negative_index_triangle():
 
 
 def test_rocket_primitive_is_a_closed_triangle_mesh():
-    V, F = rocket_primitive(n=12)
+    V, F, parts = rocket_primitive(n=12)
     assert V.shape[1] == 3
     assert F.shape[1] == 3
     assert F.min() >= 0 and F.max() < len(V)
+    assert len(parts) == len(F)
+
+
+def test_rocket_primitive_has_fins_and_a_roll_marker():
+    V, F, parts = rocket_primitive(n=24, fin_count=4)
+    assert set(parts) == {"body", "nose", "stripe", "fin", "fin_marked"}
+    # exactly one marked fin (2 triangles), the rest are plain fins
+    assert list(parts).count("fin_marked") == 2
+    assert list(parts).count("fin") == 2 * (4 - 1)
+
+
+def test_rocket_primitive_fin_count_is_configurable():
+    _, F, parts = rocket_primitive(fin_count=6)
+    n_fin_tris = sum(1 for p in parts if p in ("fin", "fin_marked"))
+    assert n_fin_tris == 2 * 6
 
 
 def test_decimate_mesh_reduces_face_count():
-    V, F = rocket_primitive(n=64)
+    V, F, _ = rocket_primitive(n=64)
     n0 = len(F)
     Vd, Fd = decimate_mesh(V, F, target_faces=n0 // 4)
     assert len(Fd) < n0
@@ -33,7 +51,27 @@ def test_decimate_mesh_reduces_face_count():
 
 
 def test_decimate_mesh_noop_when_under_target():
-    V, F = rocket_primitive(n=8)
+    V, F, _ = rocket_primitive(n=8)
     Vd, Fd = decimate_mesh(V, F, target_faces=10_000)
     assert np.array_equal(V, Vd)
     assert np.array_equal(F, Fd)
+
+
+def test_glyph_face_colors_matches_default_palette():
+    _, F, parts = rocket_primitive(n=12)
+    colors = glyph_face_colors(parts)
+    assert colors.shape == (len(F), 3)
+    for i, p in enumerate(parts):
+        assert tuple(colors[i]) == GLYPH_COLORS[p]
+
+
+def test_glyph_face_colors_highlight_preserves_roll_marker():
+    _, F, parts = rocket_primitive(n=12)
+    shred_red = (0.85, 0.06, 0.10)
+    colors = glyph_face_colors(parts, highlight=shred_red)
+    marker = GLYPH_COLORS["fin_marked"]
+    for i, p in enumerate(parts):
+        if p in ("fin_marked", "stripe"):
+            assert tuple(colors[i]) == pytest.approx(marker)
+        else:
+            assert tuple(colors[i]) == pytest.approx(shred_red)

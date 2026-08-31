@@ -29,3 +29,23 @@ def test_visualize_textured_example_obj(tmp_path):
     assert result == str(out)
     assert out.exists()
     assert out.stat().st_size > 0
+
+
+def test_glyph_actor_stays_bound_to_its_live_polydata():
+    """Regression guard: add_mesh(..., smooth_shading=True) makes pyvista
+    bind the actor's mapper to an internally-generated normals copy instead
+    of the PolyData we hold - so per-frame poly.points/cell_data mutations
+    in apply_pose() would silently stop reaching the screen (found via a
+    garbled/frozen render). The glyph must use flat shading to avoid this."""
+    import numpy as np
+    from blueraven_visualizer.mesh import rocket_primitive, glyph_face_colors
+
+    V, F, parts = rocket_primitive()
+    faces = np.hstack([np.full((len(F), 1), 3), F]).astype(np.int64)
+    poly = pv.PolyData(V, faces)
+    poly.cell_data["colors"] = (glyph_face_colors(parts) * 255).astype(np.uint8)
+
+    plotter = pv.Plotter(off_screen=True)
+    actor = plotter.add_mesh(poly, scalars="colors", rgb=True, smooth_shading=False)
+    assert actor.mapper.dataset is poly
+    plotter.close()

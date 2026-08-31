@@ -43,3 +43,15 @@ def test_report_is_stable_and_nonempty():
     lines = text.splitlines()
     assert len(lines) > 3
     assert text == build_report(t_hr, accel_mag, gyro_mag)
+
+
+def test_report_has_no_diagnosis_or_interpretation():
+    """The report shows data only - no judgment calls about what caused a
+    shred, even when the LR data would match the old transonic-burnout
+    heuristic."""
+    t_hr, accel_mag, gyro_mag = _load_hr()
+    _, lc = load_blueraven(LR_SAMPLE)
+    t_lr = lc("Flight_Time_(s)")
+    text = build_report(t_hr, accel_mag, gyro_mag, t_lr=t_lr, lc=lc)
+    assert "DIAGNOSIS" not in text
+    assert "classic" not in text.lower()

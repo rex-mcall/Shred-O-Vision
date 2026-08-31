@@ -10,10 +10,10 @@ Built for post-flight forensics: pinpoint exactly when and how a rocket lost sta
 ## What it does
 
 - Reads a matched pair of Blue Raven CSV exports: the 500 Hz **HR** file (quaternions, accel, gyro) and the 50 Hz **LR** file (baro altitude/velocity, pyro voltages, tilt/roll, flight-state flags). The LR file is optional — without it you still get the 3D orientation view plus HR-derived acceleration/gyro panels.
-- Spins a 3D model (your own `.obj`, or a built-in rocket glyph) using the logged quaternions, with a moving time cursor synced across every panel.
+- Spins a 3D model (your own `.obj`, or a built-in rocket glyph with fins, a colored nose, and one fin + a matching body stripe painted a marker color so roll/spin is visible during playback) using the logged quaternions, with a moving time cursor synced across every panel.
 - Auto-detects liftoff, burnout, apogee, drogue/main-charge fire, the shred instant (peak IMU acceleration), and tumble onset (peak angular rate), and marks them on every plot.
-- Prints a console flight report summarizing every detected event plus max velocity/Mach and peak altitude, with a one-line diagnosis when the pattern matches a classic transonic max-load shred.
-- Exports a real-time MP4/GIF, or opens an interactive scrub/play viewer — Play/Pause, Step◀/▶, Restart, drag-to-scrub, and keyboard shortcuts (space, arrow keys, R/Home/End).
+- Prints a console flight report summarizing every detected event plus max velocity/Mach and peak altitude - data only, no interpretation.
+- Interactive playback (Play/Pause, Step◀/▶, Restart, drag-to-scrub, keyboard shortcuts) is paced to the wall clock, so it tracks real time (at `--speed 1`, the default) even if a frame takes longer to render than its nominal slot - it catches up rather than falling into slow motion. Exports a real-time-accurate MP4/GIF for sharing.
 - Two rendering backends — pick whichever fits what you need:
 
   | | `--renderer matplotlib` (default) | `--renderer pyvista` |
@@ -58,7 +58,7 @@ blueraven-visualizer HR.csv LR.csv --obj my_rocket.obj --renderer pyvista
 
 Run `blueraven-visualizer --help` for the full flag list (playback speed/FPS, model-nose axis, mesh decimation for the matplotlib backend, etc).
 
-> `--record` to a `.gif` always works out of the box. `--record` to `.mp4` with the matplotlib backend needs the `ffmpeg` binary on your `PATH` (matplotlib shells out to it) - you'll get a clear error telling you so if it's missing. The pyvista backend's MP4 export doesn't need system ffmpeg (it bundles its own via `imageio-ffmpeg`).
+> `--record` to `.mp4` or `.gif` works out of the box for both backends - no system ffmpeg install needed. matplotlib prefers a system `ffmpeg` on your `PATH` if you have one, and otherwise falls back to the copy bundled by `imageio-ffmpeg` (a core dependency); pyvista always uses its bundled copy.
 
 From Python:
 
@@ -93,9 +93,6 @@ Every run also prints a flight report to the console:
   Baro apogee           T+  13.88 s
   Drogue/Apo fired      T+  15.42 s
   Main fired             --
-----------------------------------------------------------
-  DIAGNOSIS: failure at/near burnout in the transonic
-             regime - classic max-load airframe shred.
 ----------------------------------------------------------
 ```
 

@@ -1,9 +1,12 @@
 """matplotlib rendering backend.
 
-Zero extra dependencies beyond numpy/pandas/matplotlib. Draws the OBJ (or a
-built-in glyph, untextured either way) spinning in a 3D panel next to a
+No heavy 3D-engine dependency: draws the OBJ (or a built-in fins-and-colors
+rocket glyph, untextured either way) spinning in a 3D panel next to a
 synchronized telemetry dashboard, with a moving time cursor. Works headless
 (Agg backend) for MP4/GIF export, or interactively with a scrub slider.
+Interactive playback is paced to the wall clock (not a fixed frame budget),
+so it tracks real time even when a frame takes longer to render than its
+nominal slot.
 
 The LR (low-rate baro/derived) CSV is optional: without it you still get the
 3D orientation view and HR-derived accel/gyro panels, just no altitude,
@@ -11,6 +14,7 @@ velocity, pyro-voltage, tilt/roll, or LR-flag event markers.
 """
 
 import os
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
@@ -19,7 +23,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from .dialogs import ASK, resolve_files
 from .io import load_blueraven
 from .quaternion import quat_rotmat, align_rotation, nose_vec
-from .mesh import load_obj, rocket_primitive, decimate_mesh
+from .mesh import load_obj, rocket_primitive, decimate_mesh, glyph_face_colors
 from .events import first_true_time, nearest, detect_shred
 from .report import build_report
 
@@ -80,15 +84,16 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     win = (max(win[0], t_win_src[0]), min(win[1], t_win_src[-1]))
 
     # ---- model ----
+    parts = None
     if obj:
         V, F = load_obj(obj)
+        n0 = len(F)
+        V, F = decimate_mesh(V, F, max_faces)
+        if len(F) < n0:
+            print(f"Mesh decimated {n0} -> {len(F)} faces for smooth playback "
+                  f"(raise max_faces, or set max_faces=None for MP4 export).")
     else:
-        V, F = rocket_primitive()
-    n0 = len(F)
-    V, F = decimate_mesh(V, F, max_faces)
-    if len(F) < n0:
-        print(f"Mesh decimated {n0} -> {len(F)} faces for smooth playback "
-              f"(raise max_faces, or set max_faces=None for MP4 export).")
+        V, F, parts = rocket_primitive()   # small enough it never needs decimation
     V = V - V.mean(0)
     V = (align_rotation(nose_vec(model_nose), [1, 0, 0]) @ V.T).T   # nose -> +X
     Rmax = float(np.linalg.norm(V, axis=1).max())
@@ -121,9 +126,15 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         tele = [axA, axG]
 
     # 3D panel (no edge lines -> much faster software rasterization)
+    face_colors_normal = face_colors_shred = None
+    if parts is not None:
+        face_colors_normal = glyph_face_colors(parts)
+        face_colors_shred = glyph_face_colors(parts, highlight=SHRED_COLOR)
+
     mesh = hud = None
     if show_3d:
-        mesh = Poly3DCollection(V[F], facecolor=BASE_COLOR, edgecolor="none")
+        mesh = Poly3DCollection(V[F], facecolor=(face_colors_normal if parts is not None else BASE_COLOR),
+                                edgecolor="none")
         ax3d.add_collection3d(mesh)
         for setlim in (ax3d.set_xlim, ax3d.set_ylim, ax3d.set_zlim):
             setlim(-Rmax * 1.5, Rmax * 1.5)
@@ -196,7 +207,10 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             Vk = (Rworld @ quat_rotmat(Q[ih]) @ V.T).T
             mesh.set_verts(Vk[F])
             post = (not np.isnan(tShred)) and tf >= tShred
-            mesh.set_facecolor(SHRED_COLOR if (post and shred_highlight) else BASE_COLOR)
+            if parts is not None:
+                mesh.set_facecolor(face_colors_shred if (post and shred_highlight) else face_colors_normal)
+            else:
+                mesh.set_facecolor(SHRED_COLOR if (post and shred_highlight) else BASE_COLOR)
             tilt_now = np.degrees(np.arccos(
                 np.clip(np.dot(quat_rotmat(Q[ih]) @ [1, 0, 0], v0), -1, 1)))
             hud.set_text(f"T+{tf:5.2f} s\ntilt {tilt_now:3.0f} deg\n"
@@ -219,10 +233,19 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             anim.save(record, writer="pillow", fps=fps)
         else:
             if not FFMpegWriter.isAvailable():
+                # No system ffmpeg on PATH - fall back to the ffmpeg binary
+                # bundled by imageio-ffmpeg (a core dependency), so MP4
+                # export works out of the box without a system install.
+                try:
+                    import imageio_ffmpeg
+                    import matplotlib
+                    matplotlib.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
+                except ImportError:
+                    pass
+            if not FFMpegWriter.isAvailable():
                 raise RuntimeError(
-                    f"Can't write {record}: this needs the 'ffmpeg' binary on your PATH "
-                    f"(matplotlib shells out to it for MP4 export), and it wasn't found. "
-                    f"Either install ffmpeg, or record to a .gif instead - no extra "
+                    f"Can't write {record}: no usable ffmpeg found (checked PATH and the "
+                    f"bundled imageio-ffmpeg copy). Record to a .gif instead - no extra "
                     f"install needed for that."
                 )
             anim.save(record, writer="ffmpeg", fps=fps, dpi=110)
@@ -269,13 +292,22 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     sld.on_changed(on_slider)
 
     def step(_):
-        i = state["i"]
-        if i >= n_frames - 1:
+        # Paced to elapsed wall-clock time (scaled by `speed`), not a fixed
+        # frame-index increment: if a frame took longer to render than its
+        # nominal 1/fps slot, this jumps straight to where playback should
+        # be *now* instead of drifting into slow motion.
+        elapsed = time.perf_counter() - state["wall_t0"]
+        target_t = state["data_t0"] + elapsed * speed
+        if target_t >= win[1]:
             stop()
+            goto(n_frames - 1)
             return anim_artists
-        state["i"] = i + 1
-        artists = draw(frame_times[state["i"]])
-        sync_slider(state["i"])
+        i = nearest(frame_times, target_t)
+        if i == state["i"]:
+            return anim_artists   # nothing new to draw yet
+        state["i"] = i
+        artists = draw(frame_times[i])
+        sync_slider(i)
         return artists
 
     def stop():
@@ -300,10 +332,16 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             state["i"] = 0
         state["playing"] = True
         btn_play.label.set_text("Pause")
+        state["wall_t0"] = time.perf_counter()
+        state["data_t0"] = frame_times[state["i"]]
         if use_blit:
             for a in anim_artists:
                 a.set_animated(True)
-        state["anim"] = FuncAnimation(fig, step, interval=1000 / fps,
+        # Poll faster than `fps` - the wall-clock pacing in step() is what
+        # keeps playback speed correct; polling more often just means less
+        # slack between an actual redraw and the moment it was due.
+        interval_ms = min(1000.0 / max(fps, 1), 20.0)
+        state["anim"] = FuncAnimation(fig, step, interval=interval_ms,
                                       blit=use_blit, cache_frame_data=False)
         fig.canvas.draw_idle()
 
