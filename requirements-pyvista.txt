@@ -1,0 +1,7 @@
+# Optional: enables `--renderer pyvista` (real textured OBJ/MTL rendering,
+# hardware-accelerated via VTK). Install with:
+#   pip install -r requirements.txt -r requirements-pyvista.txt
+pyvista>=0.44
+vtk>=9.2
+imageio>=2.30
+imageio-ffmpeg>=0.4

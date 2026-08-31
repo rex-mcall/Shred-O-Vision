@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blueraven-visualizer"
+version = "0.1.0"
+description = "3D orientation + telemetry dashboard visualizer for Featherweight Blue Raven flight-computer logs"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Rex McAllister" }]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+    "pillow>=9.0",
+]
+
+[project.optional-dependencies]
+pyvista = ["pyvista>=0.44", "vtk>=9.2", "imageio>=2.30", "imageio-ffmpeg>=0.4"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+blueraven-visualizer = "blueraven_visualizer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

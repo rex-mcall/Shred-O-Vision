@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# rendered output from running the tool locally (not the bundled examples)
+/out/
+*.mp4
+*.gif
+!examples/**/*.mp4

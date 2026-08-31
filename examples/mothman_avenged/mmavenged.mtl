@@ -1,0 +1,358 @@
+# mat_1_Wildman FWFG Nosecone
+newmtl mat_1
+illum 2
+Ns 750.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 1.0 1.0 1.0
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/nosecone.png
+# mat_2_Nosecone Trackers + Aluminum Nose Tip
+newmtl mat_2
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_3_Payload Switch Band
+newmtl mat_3
+illum 2
+Ns 750.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 1.0 1.0 1.0
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/payload (1).png
+# mat_4_Tube Coupler
+newmtl mat_4
+illum 2
+Ns 75.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.65882355 0.57254905 0.45490196
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/spiral-wound-alpha.png
+# mat_5_Payload Mass
+newmtl mat_5
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_6_Additional Ballast
+newmtl mat_6
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_7_Payload Mounting Disc
+newmtl mat_7
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wood.jpg
+# mat_8_Bulkhead + U-bolt
+newmtl mat_8
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wood.jpg
+# mat_9_Upper Airframe
+newmtl mat_9
+illum 2
+Ns 750.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 1.0 1.0 1.0
+Ks 0.25 0.25 0.25
+map_Kd -o -0.125 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/upperAirframe.png
+# mat_10_Iris Ultra Compact Parachute [Cd 2.2 (22.0 oz) 128.2 in^3]
+newmtl mat_10
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/chute.jpg
+# mat_11_SkyAngle Cert-3 Drogue [Cd 1.16 (6 oz) 36 in^3]
+newmtl mat_11
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/chute.jpg
+# mat_12_Deployment Bag (SkyAngle DBXXL)
+newmtl mat_12
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_13_40' Shock Cord
+newmtl mat_13
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_14_Valkyrie Soft Links
+newmtl mat_14
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_15_Blanket
+newmtl mat_15
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_16_Cord Protectors
+newmtl mat_16
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_17_Swivel
+newmtl mat_17
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_18_Avionics Switch Band
+newmtl mat_18
+illum 2
+Ns 750.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 1.0 1.0 1.0
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/avbay.png
+# mat_19_Tube Coupler
+newmtl mat_19
+illum 2
+Ns 75.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.65882355 0.57254905 0.45490196
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/spiral-wound-alpha.png
+# mat_20_Bulkhead
+newmtl mat_20
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wood.jpg
+# mat_21_Bulkhead
+newmtl mat_21
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wood.jpg
+# mat_22_Avionics AUW
+newmtl mat_22
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_23_Drogue Bay
+newmtl mat_23
+illum 2
+Ns 750.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 1.0 1.0 1.0
+Ks 0.25 0.25 0.25
+map_Kd -o -0.125 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/drogue (1).png
+# mat_24_SkyAngle Classic 36 [Cd 1.34 (5 oz) 51.5 in^3]
+newmtl mat_24
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/chute.jpg
+# mat_25_55' Shock Cord
+newmtl mat_25
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_26_Valkyrie Soft Links
+newmtl mat_26
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_27_Kevlar sleeve
+newmtl mat_27
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_28_Kevlar Blanket
+newmtl mat_28
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_29_Active Drag Brake Band
+newmtl mat_29
+illum 2
+Ns 750.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 1.0 1.0 1.0
+Ks 0.25 0.25 0.25
+map_Kd -o -0.125 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/airbrake (1).png
+# mat_30_Tube Coupler
+newmtl mat_30
+illum 2
+Ns 75.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.65882355 0.57254905 0.45490196
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/spiral-wound-alpha.png
+# mat_31_Bulkhead + U-bolt
+newmtl mat_31
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_32_Active Drag Internals Mass Budget
+newmtl mat_32
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_33_Exterior Reinforcement Plates
+newmtl mat_33
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_34_Interior Reinforcement Band
+newmtl mat_34
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_35_Booster
+newmtl mat_35
+illum 2
+Ns 750.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 1.0 1.0 1.0
+Ks 0.25 0.25 0.25
+map_Kd -o -0.125 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/booster (3).png
+# mat_35_Booster_O4200-WY623-I26b
+newmtl mat_35b
+illum 2
+Ns 450.00003
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.7647059 0.23529412 0.19607843
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/reusable.png
+# mat_36_Cereal Bowl
+newmtl mat_36
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/wadding.png
+# mat_37_Trapezoidal Fin Set
+newmtl mat_37
+illum 2
+Ns 750.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 1.0 1.0 1.0
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 mmavenged_img/fin (2).png
+# mat_38_Rail Button
+newmtl mat_38
+illum 2
+Ns 225.00002
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.0 0.0 0.0
+Ks 0.25 0.25 0.25
+# mat_39_Rail Button
+newmtl mat_39
+illum 2
+Ns 225.00002
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.0 0.0 0.0
+Ks 0.25 0.25 0.25
