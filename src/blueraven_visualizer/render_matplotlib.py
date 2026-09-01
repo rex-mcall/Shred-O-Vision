@@ -348,7 +348,7 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     btn_next = Button(nax, "Step >")
 
     n_frames = len(frame_times)
-    state = {"playing": False, "anim": None, "i": 0}
+    state = {"playing": False, "timer": None, "i": 0}
     # Everything that needs to visually update every frame: the 3D mesh +
     # HUD text, the telemetry cursor lines, AND the slider's own bar/handle/
     # value-label. That last part matters: Slider.set_val() schedules its
@@ -373,11 +373,10 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     # full draw): ~1000ms/frame measured, regardless of mesh complexity,
     # vs <1ms/frame once blitting only redraws what actually changed. See
     # draw()'s explicit do_3d_projection() call above for why blitting is
-    # safe here even with the 3D mesh. FuncAnimation has its own built-in
-    # blit support, but it only covers its own timer-driven ticks - manual
-    # interactions (drag the slider, click Step/Restart) go through a
-    # separate code path, so blitting is managed by hand here and used
-    # consistently for every kind of update, not just Play.
+    # safe here even with the 3D mesh. Blitting is managed by hand rather
+    # than via FuncAnimation's built-in support so that every kind of update
+    # - play ticks, slider drags, Step/Restart clicks - goes through exactly
+    # one redraw path.
     use_blit = blit
     blit_bg = {"data": None}
 
@@ -438,7 +437,7 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         fast_redraw()
     sld.on_changed(on_slider)
 
-    def step(_):
+    def step():
         # Paced to elapsed wall-clock time (scaled by `speed`), not a fixed
         # frame-index increment: if a frame took longer to render than its
         # nominal 1/fps slot, this jumps straight to where playback should
@@ -458,18 +457,18 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         fast_redraw()
 
     def stop():
-        if state["anim"] is not None:
+        timer = state.get("timer")
+        if timer is not None:
             try:
-                state["anim"].event_source.stop()
+                timer.stop()
             except Exception:
                 pass
-            state["anim"] = None
+            state["timer"] = None
         state["playing"] = False
         btn_play.label.set_text("Play")
         fast_redraw()
 
     def play():
-        from matplotlib.animation import FuncAnimation
         if state["playing"]:
             return
         if state["i"] >= n_frames - 1:
@@ -478,15 +477,22 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         btn_play.label.set_text("Pause")
         state["wall_t0"] = time.perf_counter()
         state["data_t0"] = frame_times[state["i"]]
-        # Poll at the intended frame rate, not faster: step() already only
-        # does real work when the wall clock has actually advanced past the
-        # next frame, so polling faster than fps buys nothing but wasted
-        # ticks. blit=False here - the FuncAnimation timer only drives
-        # *when* step() runs; fast_redraw() (called from inside step())
-        # handles the actual blitting.
-        interval_ms = 1000.0 / max(fps, 1)
-        state["anim"] = FuncAnimation(fig, step, interval=interval_ms,
-                                      blit=False, cache_frame_data=False)
+        # A plain backend timer, NOT FuncAnimation: FuncAnimation defers
+        # starting its timer until the next draw_event (it connects _start
+        # to 'draw_event' in its constructor), and every redraw here is a
+        # blit - restore_region/draw_artist/blit - which never emits one. So
+        # the animation was created and then simply never started: Play
+        # appeared to do nothing while the slider, which doesn't depend on
+        # that, worked fine. We already hand-roll blitting, so none of
+        # FuncAnimation's own machinery was buying anything anyway.
+        #
+        # Poll at the intended frame rate, not faster: step() only does real
+        # work once the wall clock has passed the next frame's time.
+        interval_ms = int(round(1000.0 / max(fps, 1)))
+        timer = fig.canvas.new_timer(interval=interval_ms)
+        timer.add_callback(step)
+        timer.start()
+        state["timer"] = timer
         fast_redraw()
 
     def toggle_play(_=None):
