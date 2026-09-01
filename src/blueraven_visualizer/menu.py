@@ -1,8 +1,10 @@
 """Guided, plain-language wizard for people who don't want to learn CLI
 flags. Runs automatically when the program is started with no arguments
 (e.g. double-clicking a shortcut, or VS Code's Run button), or explicitly
-via `--menu`. Uses the same native file-picker dialogs as everywhere else -
-just wrapped in numbered questions with sensible defaults instead of flags.
+via `--menu`. Kept deliberately fast: it always opens the HR, LR, and OBJ
+file pickers directly (Cancel skips the optional ones) rather than asking
+a yes/no question first, then just a few numbered questions for everything
+else.
 """
 
 import importlib.util
@@ -37,12 +39,10 @@ def run_menu():
     print(_RULE)
     print("  Blue Raven Visualizer - guided setup")
     print(_RULE)
-    print("Answer a few questions to get started - press Enter to accept")
-    print("the default for anything you're not sure about.")
+    print("A file picker will open for each file below - Cancel skips an")
+    print("optional one. Then answer a couple of quick questions.\n")
 
-    print("\nStep 1 of 5: pick your flight-computer files.")
-    print("A window will open - navigate to your Blue Raven CSV export.")
-    input("Press Enter to choose the HIGH-RATE (HR) CSV file...")
+    print("Opening file picker: HIGH-RATE (HR) Blue Raven CSV...")
     hr_csv = pick_file("Select HIGH-RATE (HR) Blue Raven CSV",
                         [("CSV files", "*.csv"), ("All files", "*.*")])
     if not hr_csv:
@@ -50,32 +50,18 @@ def run_menu():
         raise SystemExit(0)
     print(f"  Using: {hr_csv}")
 
-    want_lr = _choice(
-        "Do you also have a matching LOW-RATE (LR) CSV file? It adds altitude, "
-        "velocity, and pyro-continuity charts alongside the 3D view.",
-        [("Yes, I have one", True), ("No, orientation view only", False)],
-    )
-    lr_csv = None
-    if want_lr:
-        input("Press Enter to choose the LOW-RATE (LR) CSV file...")
-        lr_csv = pick_file("Select LOW-RATE (LR) Blue Raven CSV",
-                            [("CSV files", "*.csv"), ("All files", "*.*")], optional=True)
-        print(f"  Using: {lr_csv}" if lr_csv else "  Skipped - no LR file selected.")
+    print("\nOpening file picker: LOW-RATE (LR) Blue Raven CSV "
+          "(adds altitude/velocity/pyro charts - Cancel to skip)...")
+    lr_csv = pick_file("Select LOW-RATE (LR) Blue Raven CSV",
+                        [("CSV files", "*.csv"), ("All files", "*.*")], optional=True)
+    print(f"  Using: {lr_csv}" if lr_csv else "  Skipped - orientation view only.")
 
-    print("\nStep 2 of 5: 3D rocket model (optional).")
-    want_obj = _choice(
-        "Do you have a 3D model of your rocket (a .obj file)?",
-        [("No, use a generic rocket shape", False), ("Yes, I have one", True)],
-        default=1,
-    )
-    obj = None
-    if want_obj:
-        input("Press Enter to choose the .obj model file...")
-        obj = pick_file("Select OBJ model", [("OBJ models", "*.obj"), ("All files", "*.*")],
-                        optional=True)
-        print(f"  Using: {obj}" if obj else "  Skipped - using the generic rocket shape.")
+    print("\nOpening file picker: 3D rocket model, .obj "
+          "(Cancel to use a generic rocket shape)...")
+    obj = pick_file("Select OBJ model", [("OBJ models", "*.obj"), ("All files", "*.*")],
+                    optional=True)
+    print(f"  Using: {obj}" if obj else "  Skipped - using the generic rocket shape.")
 
-    print("\nStep 3 of 5: display mode.")
     pyvista_available = importlib.util.find_spec("pyvista") is not None
     renderer_options = [("Standard - shows the flight-data charts (recommended)", "matplotlib")]
     if pyvista_available:
@@ -86,14 +72,12 @@ def run_menu():
         print("   install - run 'pip install blueraven-visualizer[pyvista]' to unlock it.)")
     renderer = _choice("Which display mode do you want?", renderer_options)
 
-    print("\nStep 4 of 5: what part of the flight?")
     window = _choice(
         "What part of the flight do you want to see?",
         [("Just the shred / failure moment (recommended)", "shred"),
          ("The entire flight", None)],
     )
 
-    print("\nStep 5 of 5: watch it, or save a video?")
     action = _choice(
         "What do you want to do with it?",
         [("Watch it now (play/pause/scrub on screen)", "watch"),

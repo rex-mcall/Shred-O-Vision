@@ -6,16 +6,16 @@ import blueraven_visualizer.menu as menu
 
 
 def test_menu_all_defaults_skips_lr_and_obj(monkeypatch):
+    def fake_pick_file(title, *a, **k):
+        return "/fake/hr.csv" if "HIGH-RATE" in title else None   # Cancel on LR and OBJ
+
     inputs = iter([
-        "",    # press Enter to open the HR file dialog
-        "2",   # LR file? -> No
-        "",    # OBJ model? -> default (No, use generic shape)
         "",    # display mode -> default (matplotlib)
         "",    # window -> default (shred)
         "",    # action -> default (watch)
     ])
     monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
-    monkeypatch.setattr(menu, "pick_file", lambda *a, **k: "/fake/hr.csv")
+    monkeypatch.setattr(menu, "pick_file", fake_pick_file)
 
     choices = menu.run_menu()
 
@@ -39,11 +39,6 @@ def test_menu_picks_lr_and_obj_and_exports(monkeypatch):
         return "/fake/model.obj"
 
     inputs = iter([
-        "",    # press Enter to open the HR file dialog
-        "1",   # LR file? -> Yes
-        "",    # press Enter to open the LR file dialog
-        "2",   # OBJ model? -> Yes
-        "",    # press Enter to open the OBJ file dialog
         "1",   # display mode -> matplotlib (still first option)
         "2",   # window -> entire flight
         "2",   # action -> export
@@ -60,7 +55,27 @@ def test_menu_picks_lr_and_obj_and_exports(monkeypatch):
     assert choices["obj"] == "/fake/model.obj"
     assert choices["window"] is None
     assert choices["record"] == "blueraven_clip.mp4"
+    # HR, LR, and OBJ dialogs all fire unprompted - no yes/no gating first
     assert len(picked["calls"]) == 3
+
+
+def test_menu_prompts_for_all_three_files_unconditionally(monkeypatch):
+    """The whole point of the latest revision: no "do you have an LR/OBJ
+    file?" gating question - all three file dialogs always fire."""
+    seen_titles = []
+
+    def fake_pick_file(title, *a, **k):
+        seen_titles.append(title)
+        return "/fake/hr.csv" if "HIGH-RATE" in title else None
+
+    monkeypatch.setattr("builtins.input", lambda *a: "")
+    monkeypatch.setattr(menu, "pick_file", fake_pick_file)
+
+    menu.run_menu()
+
+    assert any("HIGH-RATE" in t for t in seen_titles)
+    assert any("LOW-RATE" in t for t in seen_titles)
+    assert any("OBJ" in t for t in seen_titles)
 
 
 def test_menu_exits_cleanly_if_no_hr_file_selected(monkeypatch):

@@ -31,12 +31,10 @@ Run `blueraven-visualizer` with nothing after it (or double-click `run.py`, or h
 ============================================================
   Blue Raven Visualizer - guided setup
 ============================================================
-Answer a few questions to get started - press Enter to accept
-the default for anything you're not sure about.
+A file picker will open for each file below - Cancel skips an
+optional one. Then answer a couple of quick questions.
 
-Step 1 of 5: pick your flight-computer files.
-A window will open - navigate to your Blue Raven CSV export.
-Press Enter to choose the HIGH-RATE (HR) CSV file...
+Opening file picker: HIGH-RATE (HR) Blue Raven CSV...
 ```
 
 Everything below this point (the `--flag` examples) is for when you want more control.
