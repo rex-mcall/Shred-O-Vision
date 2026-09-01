@@ -13,7 +13,7 @@ Replay any flight from the rocket's own point of view - a clean nominal flight o
 - Spins a 3D model (your own `.obj`, or a built-in rocket glyph with fins, a colored nose, and one fin + a matching body stripe painted a marker color so roll/spin is visible during playback) using the logged quaternions, with a moving time cursor synced across every panel. The matplotlib backend real-time-shades every face from its own current normal (not matplotlib's `shade=True`, which freezes lighting at the model's starting orientation and never updates it as the mesh rotates) - real geometric detail like fins reads clearly even in flat gray, not just with pyvista's textures. A real OBJ (which has no per-part labels to build a marker from the way the built-in glyph does) gets the same roll-visibility treatment a different way - a stripe painted by angular position around the model's own long axis, so it rotates rigidly with the mesh regardless of what the geometry actually represents. `--record`ed exports also render your OBJ at much higher detail than interactive playback does (playback decimates a large mesh aggressively to stay responsive; a one-time export isn't racing a live frame budget, so it keeps ~5x more geometry).
 - Auto-detects liftoff, burnout, apogee, drogue/main-charge fire, peak acceleration (max thrust on a nominal flight; the break on a failure) and peak angular rate, and marks them on every plot.
 - Prints a console flight report summarizing every detected event plus max velocity/Mach and peak altitude - data only, no interpretation. Max velocity is taken over the ascent, and Mach is reported at that same instant: the Blue Raven's inertial velocities drift badly once the airframe is tumbling or under canopy, so a whole-flight maximum reports descent noise as flight performance.
-- Interactive playback (Play/Pause, Step◀/▶, Restart, drag-to-scrub, keyboard shortcuts) is paced to the wall clock, so it tracks real time (at `--speed 1`, the default) even if a frame takes longer to render than its nominal slot - it catches up rather than falling into slow motion. The matplotlib backend blits (redraws only what changed - the mesh, cursors, and the slider itself - instead of the whole figure, ticks and all, every frame), the difference between roughly 1000ms and 15ms per interaction. Exports a real-time-accurate MP4/GIF for sharing.
+- Interactive playback (Play/Pause, Step◀/▶, Restart, drag-to-scrub, keyboard shortcuts) is paced to the wall clock, so it tracks real time (at `--speed 1`, the default) even if a frame takes longer to render than its nominal slot - it catches up rather than falling into slow motion. The matplotlib backend blits (redraws only what changed - the mesh, cursors, and the slider itself - instead of the whole figure, ticks and all, every frame), measured at ~450 ms per interaction before, ~16 ms after. Exports a real-time-accurate MP4/GIF for sharing.
 - Two rendering backends — pick whichever fits what you need:
 
   | | `--renderer matplotlib` (default) | `--renderer pyvista` |
@@ -88,7 +88,7 @@ Run `blueraven-visualizer --help` for the full flag list (playback speed/FPS, mo
 >
 > `--record` renders frames by blitting (reusing the static background and redrawing only the mesh, HUD and time cursors) and streams them straight to the encoder, rather than doing a full figure redraw per frame - measured at ~30 ms/frame instead of ~280-710 ms.
 >
-> `--record` to `.mp4` or `.gif` works out of the box for both backends - no system ffmpeg install needed. matplotlib prefers a system `ffmpeg` on your `PATH` if you have one, and otherwise falls back to the copy bundled by `imageio-ffmpeg` (a core dependency); pyvista always uses its bundled copy.
+> `--record` to `.mp4` or `.gif` works out of the box on both backends with nothing installed system-wide: encoding goes through the ffmpeg binary bundled by `imageio-ffmpeg`, which is a core dependency.
 
 From Python:
 
@@ -115,7 +115,7 @@ Every run also prints a flight report to the console:
 ----------------------------------------------------------
   Liftoff               T+   0.00 s
   Burnout (flag)        T+   6.30 s
-  Max velocity          T+   6.28 s    1602 ft/s  (Mach 1.50)
+  Max velocity          T+   6.28 s    1602 ft/s  (Mach 1.39)
   Peak altitude AGL     T+   6.56 s    9214 ft
 ----------------------------------------------------------
   Peak acceleration     T+   6.47 s    309 g
@@ -123,7 +123,7 @@ Every run also prints a flight report to the console:
 ----------------------------------------------------------
   Baro apogee           T+  13.88 s
   Drogue/Apo fired      T+  15.42 s
-  Main fired             --
+  Main fired            T+  88.80 s
 ----------------------------------------------------------
 ```
 

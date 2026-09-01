@@ -1,0 +1,11 @@
+# Normalize text to LF in the repository; check out native on each platform.
+* text=auto
+
+# Model/data assets git shouldn't try to line-ending-convert or diff as text.
+*.obj  -text
+*.mtl  -text
+*.csv  -text
+*.mp4  binary
+*.gif  binary
+*.png  binary
+*.jpg  binary
