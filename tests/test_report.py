@@ -16,14 +16,24 @@ def _load_hr():
     return t_hr, accel_mag, gyro_mag
 
 
-def test_report_hr_only_has_shred_and_tumble_but_no_lr_sections():
+def test_report_hr_only_has_peaks_but_no_lr_sections():
     t_hr, accel_mag, gyro_mag = _load_hr()
     text = build_report(t_hr, accel_mag, gyro_mag)
     assert "BLUE RAVEN FLIGHT REPORT" in text
-    assert "SHRED" in text
-    assert "Tumble onset" in text
+    assert "Peak acceleration" in text
+    assert "Peak angular rate" in text
     assert "Liftoff" not in text
     assert "Baro apogee" not in text
+
+
+def test_report_uses_neutral_wording_not_failure_wording():
+    """The tool replays any flight, not just breakups: a nominal flight's
+    peak acceleration is just max thrust, so the report must not label it
+    with failure-specific language."""
+    t_hr, accel_mag, gyro_mag = _load_hr()
+    text = build_report(t_hr, accel_mag, gyro_mag)
+    assert "SHRED" not in text.upper()
+    assert "tumble" not in text.lower()
 
 
 def test_report_with_lr_includes_liftoff_and_mach():

@@ -1,8 +1,8 @@
 # blueraven-visualizer
 
-Turns a [Featherweight Blue Raven](https://www.featherweightaltimeters.com/) flight-computer log into a 3D rocket-orientation animation, synced to a telemetry dashboard (pyro-charge voltages, altitude/velocity, tilt/roll), with automatic detection of the peak-acceleration ("shred"/structural-failure) instant.
+Turns a [Featherweight Blue Raven](https://www.featherweightaltimeters.com/) flight-computer log into a 3D rocket-orientation animation, synced to a telemetry dashboard (pyro-charge voltages, altitude/velocity, tilt/roll).
 
-Built for post-flight forensics: pinpoint exactly when and how a rocket lost stability, and watch it happen from the rocket's own point of view.
+Replay any flight from the rocket's own point of view - a clean nominal flight or a breakup. It reports the key instants (liftoff, burnout, apogee, deployments, peak acceleration and angular rate) and leaves the interpretation to you; for failure analysis, `--window peak --highlight-peak` zooms to the peak-g instant and marks everything after it.
 
 ![CI](https://github.com/rexmcall/blueraven-visualizer/actions/workflows/ci.yml/badge.svg)
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
@@ -10,8 +10,8 @@ Built for post-flight forensics: pinpoint exactly when and how a rocket lost sta
 ## What it does
 
 - Reads a matched pair of Blue Raven CSV exports: the 500 Hz **HR** file (quaternions, accel, gyro) and the 50 Hz **LR** file (baro altitude/velocity, pyro voltages, tilt/roll, flight-state flags). The LR file is optional — without it you still get the 3D orientation view plus HR-derived acceleration/gyro panels.
-- Spins a 3D model (your own `.obj`, or a built-in rocket glyph with fins, a colored nose, and one fin + a matching body stripe painted a marker color so roll/spin is visible during playback) using the logged quaternions, with a moving time cursor synced across every panel. The matplotlib backend real-time-shades every face from its own current normal (not matplotlib's `shade=True`, which freezes lighting at the model's starting orientation and never updates it as the mesh rotates) - real geometric detail like fins reads clearly even in flat gray, not just with pyvista's textures. A real OBJ (which has no per-part labels to build a marker from the way the built-in glyph does) gets the same roll-visibility treatment a different way - a stripe painted by angular position around the model's own long axis, so it rotates rigidly with the mesh regardless of what the geometry actually represents. `--record`ed exports also render your OBJ at full, undecimated detail (interactive playback still decimates a large mesh to stay smooth, since it isn't racing a one-time export's clock).
-- Auto-detects liftoff, burnout, apogee, drogue/main-charge fire, the shred instant (peak IMU acceleration), and tumble onset (peak angular rate), and marks them on every plot.
+- Spins a 3D model (your own `.obj`, or a built-in rocket glyph with fins, a colored nose, and one fin + a matching body stripe painted a marker color so roll/spin is visible during playback) using the logged quaternions, with a moving time cursor synced across every panel. The matplotlib backend real-time-shades every face from its own current normal (not matplotlib's `shade=True`, which freezes lighting at the model's starting orientation and never updates it as the mesh rotates) - real geometric detail like fins reads clearly even in flat gray, not just with pyvista's textures. A real OBJ (which has no per-part labels to build a marker from the way the built-in glyph does) gets the same roll-visibility treatment a different way - a stripe painted by angular position around the model's own long axis, so it rotates rigidly with the mesh regardless of what the geometry actually represents. `--record`ed exports also render your OBJ at much higher detail than interactive playback does (playback decimates a large mesh aggressively to stay responsive; a one-time export isn't racing a live frame budget, so it keeps ~5x more geometry).
+- Auto-detects liftoff, burnout, apogee, drogue/main-charge fire, peak acceleration (max thrust on a nominal flight; the break on a failure) and peak angular rate, and marks them on every plot.
 - Prints a console flight report summarizing every detected event plus max velocity/Mach and peak altitude - data only, no interpretation.
 - Interactive playback (Play/Pause, Step◀/▶, Restart, drag-to-scrub, keyboard shortcuts) is paced to the wall clock, so it tracks real time (at `--speed 1`, the default) even if a frame takes longer to render than its nominal slot - it catches up rather than falling into slow motion. The matplotlib backend blits (redraws only what changed - the mesh, cursors, and the slider itself - instead of the whole figure, ticks and all, every frame), the difference between roughly 1000ms and 15ms per interaction. Exports a real-time-accurate MP4/GIF for sharing.
 - Two rendering backends — pick whichever fits what you need:
@@ -68,8 +68,12 @@ blueraven-visualizer HR.csv LR.csv --obj my_rocket.obj
 # orientation only, no LR telemetry file
 blueraven-visualizer HR.csv none
 
-# render an MP4 of just the shred window
-blueraven-visualizer HR.csv LR.csv --obj my_rocket.obj --window shred --pad 2.0 --record shred.mp4
+# whole flight (the default) as an MP4
+blueraven-visualizer HR.csv LR.csv --obj my_rocket.obj --record flight.mp4
+
+# zoom to the peak-acceleration instant, and flag everything after it
+# (failure analysis: "--window shred" still works as an alias for "peak")
+blueraven-visualizer HR.csv LR.csv --obj my_rocket.obj --window peak --pad 2.0 --highlight-peak --record breakup.mp4
 
 # textured, hardware-accelerated 3D view (needs the pyvista extra)
 blueraven-visualizer HR.csv LR.csv --obj my_rocket.obj --renderer pyvista
@@ -83,7 +87,8 @@ From Python:
 
 ```python
 from blueraven_visualizer import visualize
-visualize("HR.csv", "LR.csv", obj="my_rocket.obj", window="shred", record="shred.mp4")
+visualize("HR.csv", "LR.csv", obj="my_rocket.obj", record="flight.mp4")
+visualize("HR.csv", "LR.csv", obj="my_rocket.obj", window="peak", highlight_peak=True)
 ```
 
 ## Try it on the bundled example
@@ -92,7 +97,7 @@ visualize("HR.csv", "LR.csv", obj="my_rocket.obj", window="shred", record="shred
 
 ```bash
 cd examples/mothman_avenged
-blueraven-visualizer "BlRv_wvuer1_HR_06-17-2026_09_25_14.csv" "BlRv_wvuer1_LR_06-17-2026_09_25_14.csv" --obj mmavenged.obj --window shred --pad 2
+blueraven-visualizer "BlRv_wvuer1_HR_06-17-2026_09_25_14.csv" "BlRv_wvuer1_LR_06-17-2026_09_25_14.csv" --obj mmavenged.obj --window peak --pad 2
 ```
 
 Every run also prints a flight report to the console:
@@ -106,8 +111,8 @@ Every run also prints a flight report to the console:
   Max velocity          T+   6.28 s    1602 ft/s  (Mach 1.50)
   Peak altitude AGL     T+   6.56 s    9214 ft
 ----------------------------------------------------------
-  >> SHRED (peak g)     T+   6.47 s    309 g
-     Tumble onset       T+   6.69 s    3779 deg/s  (10.5 rev/s)
+  Peak acceleration     T+   6.47 s    309 g
+  Peak angular rate     T+   6.69 s    3779 deg/s  (10.5 rev/s)
 ----------------------------------------------------------
   Baro apogee           T+  13.88 s
   Drogue/Apo fired      T+  15.42 s
@@ -116,6 +121,8 @@ Every run also prints a flight report to the console:
 ```
 
 > **A note on OBJ models:** because the rocket tumbles freely, the matplotlib backend's 3D view has to fit your whole model at any rotation without distorting it - so a very slender model (long body, small diameter), or one exported as an "exploded" CAD diagram with gaps between parts, will still show some empty margin no matter how the camera is tuned. That's a framing limit, not a detail one, though - real per-face shading and a much higher default mesh-decimation budget mean the model's actual shape (fins, seams, taper) reads clearly either way. The pyvista backend doesn't have the framing limit at all (its camera fits the model once rather than guaranteeing every rotation stays in frame) and adds real textures on top, so it's still the better choice for a highly detailed or very slender model - an assembled, non-exploded model looks best in either backend.
+>
+> The OBJ reader handles the formatting variations real exporters actually emit - tab-separated face lines, a UTF-8 BOM, quads/n-gons, negative indices, `v/vt/vn` forms - and tells you if it had to skip anything, rather than silently dropping whole components.
 >
 > The pyvista backend also automatically works around two real, confirmed limitations in VTK's own OBJ importer that show up with unmodified real-world CAD/OpenRocket exports (a `-clamp on`/`off` texture option that corrupts the filename after it, and material names that are long or punctuated enough that VTK fails to match them between the `.obj` and `.mtl`) - it rewrites temporary sanitized copies before handing them to VTK and never touches your original files.
 

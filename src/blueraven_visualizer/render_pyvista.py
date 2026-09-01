@@ -22,7 +22,7 @@ from .dialogs import ASK, resolve_files
 from .io import load_blueraven
 from .quaternion import quat_rotmat, align_rotation, nose_vec, pose_rotation
 from .mesh import rocket_primitive, glyph_face_colors
-from .events import nearest, detect_shred
+from .events import nearest, detect_peak_accel
 from .report import build_report
 
 try:
@@ -35,7 +35,7 @@ except ImportError as exc:  # pragma: no cover - exercised only when extra is mi
     ) from exc
 
 BASE_COLOR = (0.78, 0.80, 0.90)
-SHRED_COLOR = (0.85, 0.06, 0.10)
+HIGHLIGHT_COLOR = (0.85, 0.06, 0.10)
 
 
 def _rotation_transform(R, center):
@@ -140,7 +140,7 @@ def _load_textured_actors(plotter, obj_path):
 
 
 def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
-              model_nose="+z", upright_start=True, shred_highlight=True,
+              model_nose="+z", upright_start=True, highlight_peak=False,
               fps=30, speed=1.0, record=None, off_screen=None):
 
     hr_csv, _, obj = resolve_files(hr_csv, None, obj)
@@ -152,11 +152,11 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     acc = np.c_[hc("Accel_X"), hc("Accel_Y"), hc("Accel_Z")]
     accel_mag = np.linalg.norm(acc, axis=1)
     gyro_mag = np.linalg.norm(np.c_[hc("Gyro_X"), hc("Gyro_Y"), hc("Gyro_Z")], axis=1)
-    tShred, gPk, _ = detect_shred(t_hr, accel_mag)
+    t_peak_g, gPk, _ = detect_peak_accel(t_hr, accel_mag)
     print(build_report(t_hr, accel_mag, gyro_mag))
 
-    if window == "shred":
-        win = (tShred - pad, tShred + pad)
+    if window in ("peak", "shred"):
+        win = (t_peak_g - pad, t_peak_g + pad)
     elif window:
         win = tuple(window)
     else:
@@ -174,7 +174,7 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         actors = _load_textured_actors(plotter, obj)
         textured = bool(actors)
 
-    poly = base_points = face_colors_normal = face_colors_shred = None
+    poly = base_points = face_colors_normal = face_colors_highlight = None
     if not textured:
         V, F, parts = rocket_primitive()
         V = V - V.mean(0)
@@ -182,7 +182,7 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         faces = np.hstack([np.full((len(F), 1), 3), F]).astype(np.int64)
         poly = pv.PolyData(V, faces)
         face_colors_normal = (glyph_face_colors(parts) * 255).astype(np.uint8)
-        face_colors_shred = (glyph_face_colors(parts, highlight=SHRED_COLOR) * 255).astype(np.uint8)
+        face_colors_highlight = (glyph_face_colors(parts, highlight=HIGHLIGHT_COLOR) * 255).astype(np.uint8)
         poly.cell_data["colors"] = face_colors_normal
         # smooth_shading=True would make add_mesh bind the actor to an
         # internally-generated normals copy instead of this PolyData, so the
@@ -245,7 +245,7 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
 
     def apply_pose(tf):
         ih = nearest(t_hr, tf)
-        post = (not np.isnan(tShred)) and tf >= tShred
+        post = highlight_peak and (not np.isnan(t_peak_g)) and tf >= t_peak_g
         if textured:
             R = pose_rotation(Rworld, Q[ih], model_align)
             transform = _rotation_transform(R, center)
@@ -255,13 +255,13 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             # base_points was already pre-aligned (nose -> +X) at construction
             R = pose_rotation(Rworld, Q[ih])
             poly.points = (R @ base_points.T).T
-            poly.cell_data["colors"] = (face_colors_shred if (post and shred_highlight)
+            poly.cell_data["colors"] = (face_colors_highlight if post
                                         else face_colors_normal)
         tilt_now = np.degrees(np.arccos(
             np.clip(np.dot(quat_rotmat(Q[ih]) @ [1, 0, 0], v0), -1, 1)))
         plotter.add_text(
             f"T+{tf:5.2f} s\ntilt {tilt_now:3.0f} deg\nspin {gyro_mag[ih]:4.0f} deg/s"
-            + ("\nSHRED" if post else ""),
+            + ("\nPAST PEAK G" if post else ""),
             position="upper_left", font_size=12, name="hud",
             color="red" if post else "black",
         )
@@ -285,9 +285,17 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             plotter.open_gif(record, fps=fps)
         else:
             plotter.open_movie(record, framerate=fps)
-        for tf in frame_times:
+        # A whole-flight export is easily ~1000 frames; without progress it
+        # looks like the program has hung.
+        n_total = len(frame_times)
+        print(f"Rendering {n_total} frames to {record} ...")
+        show_progress = n_total >= 100
+        step = max(1, n_total // 10)
+        for i, tf in enumerate(frame_times):
             apply_pose(tf)
             plotter.write_frame()
+            if show_progress and i and (i % step == 0 or i == n_total - 1):
+                print(f"  {i + 1}/{n_total} frames ({(i + 1) / n_total:.0%})", flush=True)
         plotter.close()
         print(f"Saved {record}  ({len(frame_times)} frames, {len(frame_times) / fps:.1f}s)")
         return record

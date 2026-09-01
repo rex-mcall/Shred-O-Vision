@@ -7,31 +7,69 @@ the PyVista backend gets real per-face textures for free by handing the
 `.obj`/`.mtl` pair to VTK's own `vtkOBJImporter` instead of parsing them here.
 """
 
+import os
+
 import numpy as np
 
 
 def load_obj(path):
-    """Minimal OBJ loader: v / f, triangulates n-gons, resolves negative indices."""
+    """Minimal OBJ loader: v / f, triangulates n-gons, resolves negative indices.
+
+    Tokenizes on ANY whitespace rather than checking for a literal space at a
+    fixed offset: real exporters do write `f\\t1 2 3`, and a space-only check
+    silently drops every such face. When only part of a file uses tabs (one
+    exporter, one component), the result is a model that loads with whole
+    sections - a body tube, say - simply missing. Likewise `utf-8-sig`, so a
+    leading BOM doesn't eat the first vertex and shift every face index by one.
+    """
     verts, tris = [], []
-    with open(path) as fh:
+    skipped = 0
+    with open(path, encoding="utf-8-sig", errors="replace") as fh:
         for ln in fh:
-            ln = ln.strip()
-            if not ln or ln[0] == "#":
+            parts = ln.split()
+            if not parts or parts[0].startswith("#"):
                 continue
-            if ln[0] == "v" and ln[1:2] in (" ", "\t"):
-                p = ln.split()[1:4]
-                if len(p) >= 3:
-                    verts.append([float(p[0]), float(p[1]), float(p[2])])
-            elif ln[0] == "f" and ln[1:2] == " ":
+            tag = parts[0]
+            if tag == "v":
+                if len(parts) >= 4:
+                    try:
+                        verts.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                    except ValueError:
+                        skipped += 1
+            elif tag == "f":
                 idx = []
-                for tok in ln.split()[1:]:
-                    j = int(tok.split("/")[0])
-                    idx.append(j)
+                for tok in parts[1:]:
+                    try:
+                        idx.append(int(tok.split("/")[0]))
+                    except ValueError:
+                        idx = []
+                        break
+                if len(idx) < 3:
+                    skipped += 1
+                    continue
                 nv = len(verts)
                 idx = [(nv + i if i < 0 else i - 1) for i in idx]   # to 0-based
                 for k in range(1, len(idx) - 1):
                     tris.append([idx[0], idx[k], idx[k + 1]])
-    return np.array(verts, float), np.array(tris, int)
+    if skipped:
+        print(f"Note: skipped {skipped} malformed line(s) in {os.path.basename(path)}.")
+
+    V = np.array(verts, float)
+    F = np.array(tris, int)
+    if len(V) == 0 or len(F) == 0:
+        raise ValueError(
+            f"No usable geometry found in {os.path.basename(path)} "
+            f"({len(V)} vertices, {len(F)} faces). If this file opens fine in other "
+            f"software, please report it - it likely uses an OBJ feature this "
+            f"reader doesn't handle yet."
+        )
+    # Drop faces referencing vertices that don't exist rather than letting them
+    # index out of bounds later (some exporters emit stray/global indices).
+    ok = (F >= 0).all(axis=1) & (F < len(V)).all(axis=1)
+    if not ok.all():
+        print(f"Note: dropped {(~ok).sum()} face(s) with out-of-range vertex indices.")
+        F = F[ok]
+    return V, F
 
 
 # Default paint scheme for the fallback glyph. "fin_marked"/"stripe" are the
@@ -173,16 +211,12 @@ def shade_triangles(base_colors, tri_verts, light_dir=(0.35, -0.35, 0.87), ambie
     return np.clip(base * brightness[:, None], 0, 1)
 
 
-def decimate_mesh(V, F, target_faces):
-    """Vertex-clustering decimation: snaps vertices to a grid and rebuilds faces.
-    Fast, dependency-free, and good enough for an attitude silhouette. matplotlib's
-    software 3D cost scales with face count, so this is the main perf lever."""
-    if target_faces is None or len(F) <= target_faces:
-        return V, F
+def _cluster_at(V, F, res):
+    """One vertex-clustering pass at grid resolution `res`. Snaps vertices to
+    an res^3 grid over the bounding box, averages each cell, and rebuilds the
+    faces (dropping any that collapsed to a degenerate sliver)."""
     lo, hi = V.min(0), V.max(0)
     span = np.where(hi > lo, hi - lo, 1.0)
-    ratio = (target_faces / len(F)) ** (1 / 3)
-    res = max(4, int(round((len(V) ** (1 / 3)) * ratio)))
     cell = np.clip(np.floor((V - lo) / span * res).astype(int), 0, res - 1)
     key = (cell[:, 0] * res + cell[:, 1]) * res + cell[:, 2]
     _, inv = np.unique(key, return_inverse=True)
@@ -193,3 +227,42 @@ def decimate_mesh(V, F, target_faces):
     good = (nf[:, 0] != nf[:, 1]) & (nf[:, 1] != nf[:, 2]) & (nf[:, 0] != nf[:, 2])
     nf = np.unique(np.sort(nf[good], axis=1), axis=0)
     return newV, nf
+
+
+def decimate_mesh(V, F, target_faces):
+    """Vertex-clustering decimation: snaps vertices to a grid and rebuilds faces.
+    Fast, dependency-free, and good enough for an attitude silhouette. matplotlib's
+    software 3D cost scales with face count, so this is the main perf lever.
+
+    Searches for the grid resolution that lands closest to `target_faces`
+    without exceeding it. The previous one-shot analytic guess at `res`
+    assumed faces thin out as res^3, which badly underestimates how many
+    survive on real (thin-shelled, unevenly tessellated) models: asking for
+    10000 faces on a 154k-face export actually returned 699 - a 14x
+    overshoot that threw away most of the detail being paid for.
+    """
+    if target_faces is None or len(F) <= target_faces:
+        return V, F
+
+    # Grow res until we exceed the target, then binary-search the gap. Each
+    # pass is only a few ms even on a ~150k-face mesh, and this runs once.
+    lo_res, hi_res = 4, 4
+    best = _cluster_at(V, F, lo_res)
+    while hi_res < 1024:
+        nxt = hi_res * 2
+        cand = _cluster_at(V, F, nxt)
+        if len(cand[1]) > target_faces:
+            break
+        lo_res, best, hi_res = nxt, cand, nxt
+    else:
+        return best
+
+    hi_res = min(hi_res * 2, 1024)
+    while lo_res + 1 < hi_res:
+        mid = (lo_res + hi_res) // 2
+        cand = _cluster_at(V, F, mid)
+        if len(cand[1]) <= target_faces:
+            lo_res, best = mid, cand
+        else:
+            hi_res = mid
+    return best

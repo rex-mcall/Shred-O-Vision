@@ -9,7 +9,7 @@ from .dialogs import ASK
 
 
 def _parse_window(w):
-    if w and w != "shred":
+    if w and w not in ("peak", "shred"):
         return [float(x) for x in w.split(",")]
     return w
 
@@ -40,7 +40,15 @@ def build_parser():
                      help="matplotlib (default, no extra deps, full telemetry dashboard) or "
                           "pyvista (textured/hardware-accelerated 3D view only, needs the "
                           "'pyvista' extra)")
-    ap.add_argument("--window", default=None, help="'shred' or 't0,t1'")
+    ap.add_argument("--window", default=None,
+                     help="'peak' (zoom to the peak-acceleration instant) or 't0,t1'; "
+                          "default is the whole flight. 'shred' is accepted as an alias "
+                          "for 'peak'.")
+    ap.add_argument("--highlight-peak", action="store_true",
+                     help="turn the model red for the rest of the flight once peak "
+                          "acceleration is passed - useful when analyzing a structural "
+                          "failure, off by default since on a nominal flight the peak is "
+                          "just max thrust")
     ap.add_argument("--pad", type=float, default=1.5)
     ap.add_argument("--model-nose", default="+z")
     ap.add_argument("--fps", type=int, default=30)
@@ -63,7 +71,8 @@ def _run(hr_csv, lr_csv, obj, renderer, window, record, **matplotlib_only):
         from . import render_pyvista as backend
         backend.visualize(hr_csv, obj, window=window, record=record,
                            **{k: v for k, v in matplotlib_only.items()
-                              if k in ("pad", "model_nose", "fps", "speed")})
+                              if k in ("pad", "model_nose", "fps", "speed",
+                                       "highlight_peak")})
     else:
         from . import render_matplotlib as backend
         backend.visualize(hr_csv, lr_csv, obj, window=window, record=record, **matplotlib_only)
@@ -77,7 +86,8 @@ def main(argv=None):
         from .menu import run_menu
         choices = run_menu()
         _run(choices["hr_csv"], choices["lr_csv"], choices["obj"], choices["renderer"],
-             choices["window"], choices["record"])
+             choices["window"], choices["record"],
+             highlight_peak=choices["highlight_peak"])
         return
 
     ap = build_parser()
@@ -96,6 +106,7 @@ def main(argv=None):
 
     _run(a.hr_csv, lr_csv, obj, a.renderer, window, a.record,
          pad=a.pad, model_nose=a.model_nose, fps=a.fps, speed=a.speed,
+         highlight_peak=a.highlight_peak,
          show_3d=not a.no_3d, max_faces=max_faces,
          dpi=a.dpi, blit=not a.no_blit)
 

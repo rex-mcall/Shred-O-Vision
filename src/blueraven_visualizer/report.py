@@ -1,14 +1,14 @@
 """Console flight report, ported from blueraven_visualizer.m's console output.
 
 Summarizes the key events (liftoff, burnout, max velocity/Mach, peak
-altitude, shred, tumble onset, apogee, drogue/main fire). This reports the
-data only - no diagnosis/interpretation is printed; that judgment call is
-left to the person reading it.
+altitude, peak acceleration, peak angular rate, apogee, drogue/main fire).
+This reports the data only - no diagnosis/interpretation is printed; that
+judgment call is left to the person reading it.
 """
 
 import numpy as np
 
-from .events import first_true_time, detect_shred, detect_tumble_onset
+from .events import first_true_time, detect_peak_accel, detect_peak_spin
 from .atmosphere import mach_number
 
 _RULE = "-" * 58
@@ -30,8 +30,8 @@ def build_report(t_hr, accel_mag, gyro_mag, *, t_lr=None, lc=None):
     t_lr: LR time array, or None if no LR file was loaded.
     lc: the LR column accessor from io.load_blueraven, or None.
     """
-    tShred, gPeak, _ = detect_shred(t_hr, accel_mag)
-    tSpin, wPeak, _ = detect_tumble_onset(t_hr, gyro_mag)
+    tPeakG, gPeak, _ = detect_peak_accel(t_hr, accel_mag)
+    tSpin, wPeak, _ = detect_peak_spin(t_hr, gyro_mag)
 
     lines = [_RULE, "  BLUE RAVEN FLIGHT REPORT", _RULE]
 
@@ -68,8 +68,8 @@ def build_report(t_hr, accel_mag, gyro_mag, *, t_lr=None, lc=None):
         _rep(lines, "Peak altitude AGL", tAlt, f"{altMax:.0f} ft")
         lines.append(_RULE)
 
-    _rep(lines, ">> SHRED (peak g)", tShred, f"{gPeak:.0f} g")
-    _rep(lines, "   Tumble onset", tSpin, f"{wPeak:.0f} deg/s  ({wPeak / 360:.1f} rev/s)")
+    _rep(lines, "Peak acceleration", tPeakG, f"{gPeak:.0f} g")
+    _rep(lines, "Peak angular rate", tSpin, f"{wPeak:.0f} deg/s  ({wPeak / 360:.1f} rev/s)")
 
     if has_lr:
         lines.append(_RULE)

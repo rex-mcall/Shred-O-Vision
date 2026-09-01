@@ -165,3 +165,64 @@ def test_solid_color_with_marker_colors_only_marked_faces():
     assert np.allclose(colors[0], MARKER_COLOR)
     assert np.allclose(colors[1], (0.5, 0.5, 0.5))
     assert np.allclose(colors[2], MARKER_COLOR)
+
+
+# --- loader robustness: real exporters vary in ways a naive
+# fixed-offset parser silently mangles (found by battery-testing formats) ---
+
+def _write(tmp_path, text, name="m.obj"):
+    p = tmp_path / name
+    p.write_text(text, encoding="utf-8", newline="")
+    return str(p)
+
+
+def test_load_obj_accepts_tab_separated_face_lines(tmp_path):
+    """Regression guard: `f\t1 2 3` is valid OBJ, but a parser checking for
+    a literal space at index 1 drops every such face. When an exporter uses
+    tabs for only part of a file, whole components (a body tube, say) go
+    missing while the rest renders fine."""
+    path = _write(tmp_path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf\t1 2 3\n")
+    V, F = load_obj(path)
+    assert len(V) == 3 and len(F) == 1
+
+
+def test_load_obj_handles_mixed_tab_and_space_faces(tmp_path):
+    path = _write(tmp_path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 2 0 0\nf\t1 2 3\nf 1 2 4\n")
+    _, F = load_obj(path)
+    assert len(F) == 2
+
+
+def test_load_obj_strips_utf8_bom_without_eating_the_first_vertex(tmp_path):
+    """A BOM made the first `v` line unparseable, silently shifting every
+    subsequent face index by one and skewing the whole mesh."""
+    path = _write(tmp_path, "﻿v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    V, F = load_obj(path)
+    assert len(V) == 3
+    assert F.max() < len(V)
+
+
+def test_load_obj_raises_a_clear_error_when_nothing_loads(tmp_path):
+    path = _write(tmp_path, "# just a comment\no thing\n")
+    with pytest.raises(ValueError, match="No usable geometry"):
+        load_obj(path)
+
+
+def test_load_obj_drops_out_of_range_face_indices(tmp_path):
+    path = _write(tmp_path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\nf 1 2 99\n")
+    V, F = load_obj(path)
+    assert len(F) == 1
+    assert F.max() < len(V)
+
+
+def test_decimate_mesh_lands_close_to_the_requested_face_count():
+    """Regression guard: the old one-shot analytic guess at grid resolution
+    assumed faces thin out as res^3, which is badly wrong for real thin-
+    shelled models - asking for 10000 faces on a dense mesh returned ~700,
+    throwing away most of the detail being paid for."""
+    V, F, _ = rocket_primitive(n=160, fin_count=4)
+    for target in (400, 1200):
+        _, Fd = decimate_mesh(V, F, target)
+        assert len(Fd) <= target
+        assert len(Fd) >= 0.5 * target, (
+            f"asked for {target} faces, got {len(Fd)} - decimation is overshooting"
+        )

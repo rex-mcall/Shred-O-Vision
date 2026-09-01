@@ -11,7 +11,8 @@ def test_menu_all_defaults_skips_lr_and_obj(monkeypatch):
 
     inputs = iter([
         "",    # display mode -> default (matplotlib)
-        "",    # window -> default (shred)
+        "",    # window -> default (entire flight)
+        "",    # mark peak? -> default (no)
         "",    # action -> default (watch)
     ])
     monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
@@ -23,7 +24,8 @@ def test_menu_all_defaults_skips_lr_and_obj(monkeypatch):
     assert choices["lr_csv"] is None
     assert choices["obj"] is None
     assert choices["renderer"] == "matplotlib"
-    assert choices["window"] == "shred"
+    assert choices["window"] is None          # entire flight is the default now
+    assert choices["highlight_peak"] is False  # no failure-implying red by default
     assert choices["record"] is None
 
 
@@ -40,7 +42,8 @@ def test_menu_picks_lr_and_obj_and_exports(monkeypatch):
 
     inputs = iter([
         "1",   # display mode -> matplotlib (still first option)
-        "2",   # window -> entire flight
+        "2",   # window -> zoom to peak acceleration
+        "1",   # mark peak? -> no
         "2",   # action -> export
         "1",   # format -> mp4
         "",    # filename -> default
@@ -53,7 +56,7 @@ def test_menu_picks_lr_and_obj_and_exports(monkeypatch):
     assert choices["hr_csv"] == "/fake/hr.csv"
     assert choices["lr_csv"] == "/fake/lr.csv"
     assert choices["obj"] == "/fake/model.obj"
-    assert choices["window"] is None
+    assert choices["window"] == "peak"
     assert choices["record"] == "blueraven_clip.mp4"
     # HR, LR, and OBJ dialogs all fire unprompted - no yes/no gating first
     assert len(picked["calls"]) == 3
@@ -86,20 +89,20 @@ def test_menu_export_filename_gets_the_right_extension_even_without_one(monkeypa
     def fake_pick_file(title, *a, **k):
         return "/fake/hr.csv" if "HIGH-RATE" in title else None
 
-    inputs = iter(["", "", "2", "1", "my_shred_clip"])   # export, mp4, no extension typed
+    inputs = iter(["", "", "", "2", "1", "my_clip"])   # export, mp4, no extension typed
     monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
     monkeypatch.setattr(menu, "pick_file", fake_pick_file)
 
     choices = menu.run_menu()
 
-    assert choices["record"] == "my_shred_clip.mp4"
+    assert choices["record"] == "my_clip.mp4"
 
 
 def test_menu_export_filename_wrong_extension_gets_corrected(monkeypatch):
     def fake_pick_file(title, *a, **k):
         return "/fake/hr.csv" if "HIGH-RATE" in title else None
 
-    inputs = iter(["", "", "2", "2", "clip.mp4"])   # export, GIF chosen, but typed .mp4
+    inputs = iter(["", "", "", "2", "2", "clip.mp4"])   # export, GIF chosen, but typed .mp4
     monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
     monkeypatch.setattr(menu, "pick_file", fake_pick_file)
 

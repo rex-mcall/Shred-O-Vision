@@ -49,23 +49,35 @@ def test_visualize_no_3d(tmp_path):
     assert out.exists()
 
 
-def test_max_faces_auto_uses_full_detail_for_export(capsys, tmp_path):
-    """Regression guard: interactive playback needs decimation to redraw
-    fast, but a one-time export doesn't hit that live frame-rate
-    constraint - so the default ("auto") should give exports the full,
-    undecimated mesh instead of quietly reusing the interactive cap and
-    crushing fine geometry (fins, panel seams) for no reason."""
-    out = tmp_path / "full_detail.gif"
-    visualize(EXAMPLE_HR, EXAMPLE_LR, obj=EXAMPLE_OBJ, window="shred", pad=0.2,
+def _decimated_face_count(output):
+    """Parse 'Mesh decimated N -> M faces ...' out of captured stdout."""
+    for line in output.splitlines():
+        if line.startswith("Mesh decimated"):
+            return int(line.split("->")[1].split()[0])
+    return None
+
+
+def test_max_faces_auto_gives_exports_far_more_detail_than_interactive(capsys, tmp_path):
+    """Regression guard: interactive playback needs aggressive decimation to
+    redraw fast, but a one-time export isn't racing a live frame budget - it
+    should keep far more geometry so fins/panel seams survive. Bounded, not
+    unlimited: whole-flight is the default window now, so an unbounded
+    export means ~1000 frames of very slow rendering."""
+    out = tmp_path / "detail.gif"
+    visualize(EXAMPLE_HR, EXAMPLE_LR, obj=EXAMPLE_OBJ, window="peak", pad=0.2,
               fps=4, record=str(out))
-    assert "Mesh decimated" not in capsys.readouterr().out
-    assert out.exists()
+    export_faces = _decimated_face_count(capsys.readouterr().out)
 
-
-def test_max_faces_auto_still_caps_for_interactive_playback(capsys):
     visualize(EXAMPLE_HR, EXAMPLE_LR, obj=EXAMPLE_OBJ, window=[6.0, 6.5],
               fps=8, record=None)
-    assert "Mesh decimated" in capsys.readouterr().out
+    interactive_faces = _decimated_face_count(capsys.readouterr().out)
+
+    assert interactive_faces is not None, "interactive playback should still decimate"
+    assert export_faces is None or export_faces > interactive_faces * 3, (
+        f"export kept {export_faces} faces vs interactive {interactive_faces} - "
+        f"exports should keep substantially more detail"
+    )
+    assert out.exists()
 
 
 def test_visualize_bundled_example_with_real_textured_obj(tmp_path):

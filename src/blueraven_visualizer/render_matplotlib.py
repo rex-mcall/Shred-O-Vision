@@ -27,15 +27,15 @@ from .mesh import (
     load_obj, rocket_primitive, decimate_mesh, glyph_face_colors, shade_triangles,
     angular_roll_marker, solid_color_with_marker,
 )
-from .events import first_true_time, nearest, detect_shred
+from .events import first_true_time, nearest, detect_peak_accel
 from .report import build_report
 
 BASE_COLOR = (0.78, 0.80, 0.90)
-SHRED_COLOR = (0.85, 0.06, 0.10)
+HIGHLIGHT_COLOR = (0.85, 0.06, 0.10)
 
 
 def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
-              model_nose="+z", upright_start=True, shred_highlight=True,
+              model_nose="+z", upright_start=True, highlight_peak=False,
               fps=30, speed=1.0, record=None, decim_plot=5,
               show_3d=True, max_faces="auto", dpi=100, blit=True):
 
@@ -44,15 +44,15 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     has_lr = lr_csv is not None
 
     if max_faces == "auto":
-        # Interactive playback needs to redraw many times a second, so a
-        # detailed real-world OBJ (tens of thousands of faces) has to be
-        # decimated to stay smooth. A one-time video export doesn't have
-        # that constraint - it just needs to finish rendering in a
-        # reasonable total time, not hit a live frame budget - so give it
-        # the full, undecimated mesh instead: much better fin/panel detail
-        # in the saved clip, at the cost of a slower (but still one-time)
-        # export.
-        max_faces = None if record else 10000
+        # Interactive playback redraws many times a second, so a detailed
+        # real-world OBJ has to be decimated to stay responsive. A one-time
+        # export isn't racing a live frame budget, so it gets a much higher
+        # allowance - but not an unlimited one: now that the whole flight is
+        # the default window, a long flight is ~1000 frames, and at fully
+        # undecimated detail (~0.35 s/frame on the bundled example) that's
+        # minutes of silent grinding. Bounded high enough that a typical
+        # rocket OBJ passes through essentially untouched.
+        max_faces = 50000 if record else 10000
 
     # ---- load ----
     _, hc = load_blueraven(hr_csv)
@@ -64,8 +64,8 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     accel_mag = np.linalg.norm(acc, axis=1)
     gyro_mag = np.linalg.norm(np.c_[hc("Gyro_X"), hc("Gyro_Y"), hc("Gyro_Z")], axis=1)
 
-    tShred, gPk, iSh = detect_shred(t_hr, accel_mag)
-    events = {"shred": tShred}
+    t_peak_g, gPk, iPk = detect_peak_accel(t_hr, accel_mag)
+    events = {"peak g": t_peak_g}
 
     lc = None
     if has_lr:
@@ -89,8 +89,8 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
 
     # ---- playback window ----
     t_win_src = t_lr if has_lr else t_hr
-    if window == "shred":
-        win = (tShred - pad, tShred + pad)
+    if window in ("peak", "shred"):
+        win = (t_peak_g - pad, t_peak_g + pad)
     elif window:
         win = tuple(window)
     else:
@@ -152,13 +152,13 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         tele = [axA, axG]
 
     # 3D panel (no edge lines -> much faster software rasterization)
-    face_colors_normal = face_colors_shred = None
+    face_colors_normal = face_colors_highlight = None
     if parts is not None:
         face_colors_normal = glyph_face_colors(parts)
-        face_colors_shred = glyph_face_colors(parts, highlight=SHRED_COLOR)
+        face_colors_highlight = glyph_face_colors(parts, highlight=HIGHLIGHT_COLOR)
     elif roll_marker is not None:
         face_colors_normal = solid_color_with_marker(BASE_COLOR, roll_marker)
-        face_colors_shred = solid_color_with_marker(SHRED_COLOR, roll_marker)
+        face_colors_highlight = solid_color_with_marker(HIGHLIGHT_COLOR, roll_marker)
 
     mesh = hud = None
     if show_3d:
@@ -194,8 +194,8 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
 
         axA.plot(t_hr[::decim_plot], accel_mag[::decim_plot], color=(0.80, 0.10, 0.20), lw=0.7)
         axA.set_ylabel("|accel| (g)"); axA.set_title("Acceleration magnitude (500 Hz)")
-        axA.annotate(f"{gPk:.0f} g", (tShred, gPk), textcoords="offset points",
-                     xytext=(5, -2), color=SHRED_COLOR, fontweight="bold")
+        axA.annotate(f"{gPk:.0f} g", (t_peak_g, gPk), textcoords="offset points",
+                     xytext=(5, -2), color=HIGHLIGHT_COLOR, fontweight="bold")
 
         axH.plot(t_lr, alt, color=(0.10, 0.45, 0.80), lw=1.3, label="alt AGL")
         axHv = axH.twinx()
@@ -210,8 +210,8 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     else:
         axA.plot(t_hr[::decim_plot], accel_mag[::decim_plot], color=(0.80, 0.10, 0.20), lw=0.7)
         axA.set_ylabel("|accel| (g)"); axA.set_title("Acceleration magnitude (500 Hz)")
-        axA.annotate(f"{gPk:.0f} g", (tShred, gPk), textcoords="offset points",
-                     xytext=(5, -2), color=SHRED_COLOR, fontweight="bold")
+        axA.annotate(f"{gPk:.0f} g", (t_peak_g, gPk), textcoords="offset points",
+                     xytext=(5, -2), color=HIGHLIGHT_COLOR, fontweight="bold")
 
         axG.plot(t_hr[::decim_plot], gyro_mag[::decim_plot], color=(0.50, 0.15, 0.65), lw=0.7)
         axG.set_ylabel("|gyro| (deg/s)"); axG.set_title("Angular rate magnitude (500 Hz)")
@@ -223,9 +223,9 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         for name, te in events.items():
             if np.isnan(te):
                 continue
-            ax.axvline(te, color=(SHRED_COLOR if name == "shred" else "0.6"),
-                       lw=(1.4 if name == "shred" else 0.7),
-                       ls=("-" if name == "shred" else ":"), alpha=0.8)
+            ax.axvline(te, color=(HIGHLIGHT_COLOR if name == "peak g" else "0.6"),
+                       lw=(1.4 if name == "peak g" else 0.7),
+                       ls=("-" if name == "peak g" else ":"), alpha=0.8)
         cursors.append(ax.axvline(win[0], color="k", lw=1.0))
         ax.set_xlim(*win)
     for ax in tele[:-1]:
@@ -241,11 +241,11 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             Vk = (Rworld @ quat_rotmat(Q[ih]) @ V.T).T
             tri = Vk[F]
             mesh.set_verts(tri)
-            post = (not np.isnan(tShred)) and tf >= tShred
+            post = highlight_peak and (not np.isnan(t_peak_g)) and tf >= t_peak_g
             if face_colors_normal is not None:
-                base = face_colors_shred if (post and shred_highlight) else face_colors_normal
+                base = face_colors_highlight if post else face_colors_normal
             else:
-                base = SHRED_COLOR if (post and shred_highlight) else BASE_COLOR
+                base = HIGHLIGHT_COLOR if post else BASE_COLOR
             mesh.set_facecolor(shade_triangles(base, tri))
             # Blitting (see use_blit below) draws animated artists via
             # ax.draw_artist(), which - unlike a full fig.canvas.draw() -
@@ -263,7 +263,7 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
                 np.clip(np.dot(quat_rotmat(Q[ih]) @ [1, 0, 0], v0), -1, 1)))
             hud.set_text(f"T+{tf:5.2f} s\ntilt {tilt_now:3.0f} deg\n"
                          f"spin {gyro_mag[ih]:4.0f} deg/s"
-                         + ("\n--- SHRED ---" if post else ""))
+                         + ("\n--- PAST PEAK G ---" if post else ""))
             artists += [mesh, hud]
         for c in cursors:
             c.set_xdata([tf, tf])
@@ -282,8 +282,20 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
                 f"Can't tell what format to save as: {record!r} needs to end in "
                 f".mp4 or .gif."
             )
+        # A whole-flight export is easily ~1000 frames and can take minutes;
+        # without this it looks like the program has simply hung. Short clips
+        # finish fast enough that per-frame chatter is just noise.
+        n_total = len(frame_times)
+        print(f"Rendering {n_total} frames to {record} ...")
+        show_progress = n_total >= 100
+        step = max(1, n_total // 10)
+
+        def on_progress(i, n):
+            if show_progress and i and (i % step == 0 or i == n_total - 1):
+                print(f"  {i + 1}/{n_total} frames ({(i + 1) / n_total:.0%})", flush=True)
+
         if ext == ".gif":
-            anim.save(record, writer="pillow", fps=fps)
+            anim.save(record, writer="pillow", fps=fps, progress_callback=on_progress)
         else:
             if not FFMpegWriter.isAvailable():
                 # No system ffmpeg on PATH - fall back to the ffmpeg binary
@@ -301,7 +313,8 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
                     f"bundled imageio-ffmpeg copy). Record to a .gif instead - no extra "
                     f"install needed for that."
                 )
-            anim.save(record, writer="ffmpeg", fps=fps, dpi=110)
+            anim.save(record, writer="ffmpeg", fps=fps, dpi=110,
+                      progress_callback=on_progress)
         plt.close(fig)
         dur = len(frame_times) / fps
         print(f"Saved {record}  ({len(frame_times)} frames, {dur:.1f}s)")

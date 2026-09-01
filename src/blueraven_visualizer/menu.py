@@ -75,8 +75,16 @@ def run_menu():
 
     window = _choice(
         "What part of the flight do you want to see?",
-        [("Just the shred / failure moment (recommended)", "shred"),
-         ("The entire flight", None)],
+        [("The entire flight (recommended)", None),
+         ("Zoom in on the peak-acceleration moment "
+          "(max thrust on a normal flight; the break on a failure)", "peak")],
+    )
+
+    highlight_peak = _choice(
+        "Mark the peak-acceleration moment by turning the rocket red for the "
+        "rest of the flight? (Handy when investigating a breakup - on a normal "
+        "flight that instant is just max thrust, so it's off by default.)",
+        [("No", False), ("Yes", True)],
     )
 
     action = _choice(
@@ -107,11 +115,12 @@ def run_menu():
     print(f"  LR file:   {lr_csv or '(none)'}")
     print(f"  3D model:  {obj or '(generic rocket shape)'}")
     print(f"  Display:   {renderer_label}")
-    print(f"  Window:    {window or 'entire flight'}")
+    print(f"  Window:    {'peak-acceleration moment' if window else 'entire flight'}")
+    print(f"  Mark peak: {'yes' if highlight_peak else 'no'}")
     print(f"  Action:    {'save video to ' + record if record else 'watch interactively'}")
     print(f"{_RULE}\n")
 
     return {
         "hr_csv": hr_csv, "lr_csv": lr_csv, "obj": obj, "renderer": renderer,
-        "window": window, "record": record,
+        "window": window, "record": record, "highlight_peak": highlight_peak,
     }
