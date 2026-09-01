@@ -21,7 +21,8 @@ import numpy as np
 from .dialogs import ASK, resolve_files
 from .io import load_blueraven
 from .quaternion import quat_rotmat, align_rotation, nose_vec, pose_rotation
-from .mesh import rocket_primitive, glyph_face_colors, detect_nose_axis
+from .mesh import (rocket_primitive, glyph_face_colors, detect_nose_axis,
+                   warn_if_partial_model)
 from .events import nearest, detect_peak_accel
 from .report import build_report
 
@@ -226,9 +227,12 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             # Detect from the imported geometry itself rather than assuming a
             # convention - exporters disagree about which axis is "up".
             pts = [p for p in (_actor_points(a) for a in actors) if p is not None]
-            model_nose = detect_nose_axis(np.vstack(pts)) if pts else "+z"
+            all_pts = np.vstack(pts) if pts else None
+            model_nose = detect_nose_axis(all_pts) if all_pts is not None else "+z"
             print(f"Model's long axis detected as {model_nose} "
                   f"(override with --model-nose if the rocket looks mis-oriented).")
+            if all_pts is not None:
+                warn_if_partial_model(all_pts, model_nose)
         model_align = align_rotation(nose_vec(model_nose), [1, 0, 0])
 
     v0 = quat_rotmat(Q[nearest(t_hr, win[0])]) @ np.array([1.0, 0, 0])

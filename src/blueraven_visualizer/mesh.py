@@ -148,13 +148,30 @@ def detect_nose_axis(V):
     "up", so assuming +z silently breaks any model that doesn't share that
     convention.
 
-    Axis = the longest bounding-box dimension (a rocket is far longer than
-    it is wide). Direction = whichever end is thinner, since the nose
-    tapers and the fin/motor end flares.
+    Axis = the direction the geometry is most spread out along (the largest
+    principal component), snapped to the nearest coordinate axis. Note this
+    is deliberately NOT the longest bounding-box dimension: a few big fins
+    can make a rocket's bbox wider than it is long (measured: a 3in
+    airbrake fin set spans 5.45 across the fins vs 5.08 along the body), so
+    bbox picks the fin axis and lays the rocket on its side. Variance
+    weights all the vertices along the body instead of just the extremes,
+    and gets it right on the same model.
+
+    Direction = whichever end is thinner, since the nose tapers and the
+    fin/motor end flares.
     """
     V = np.asarray(V, float)
+    if len(V) < 2 or np.allclose(V, V[0]):
+        return "+z"
+
+    centered = V - V.mean(0)
+    try:
+        _, principal = np.linalg.eigh(np.cov(centered.T))
+        axis = int(np.argmax(np.abs(principal[:, -1])))
+    except np.linalg.LinAlgError:                     # pragma: no cover
+        axis = int(np.argmax(V.max(0) - V.min(0)))
+
     span = V.max(0) - V.min(0)
-    axis = int(np.argmax(span))
     if span[axis] <= 0:
         return "+z"
 
@@ -173,6 +190,34 @@ def detect_nose_axis(V):
     r_hi = mean_radius(a >= hi - end)
     sign = "+" if r_hi <= r_lo else "-"
     return f"{sign}{'xyz'[axis]}"
+
+
+def axis_aspect_ratio(V, nose_axis=None):
+    """How many times longer the model is along its own roll axis than it is
+    wide. A whole rocket is slender (mmavenged: ~7.7, a typical 3in build:
+    ~5); a single exported component is not (a bare fin set measured 0.9),
+    which is a useful signal that an OBJ holds one part rather than the
+    whole airframe."""
+    V = np.asarray(V, float)
+    if len(V) < 2:
+        return 0.0
+    axis = "xyz".index((nose_axis or detect_nose_axis(V)).lstrip("+-"))
+    span = V.max(0) - V.min(0)
+    lateral = max(span[i] for i in range(3) if i != axis)
+    return float(span[axis] / lateral) if lateral > 0 else 0.0
+
+
+def warn_if_partial_model(V, nose_axis=None, min_aspect=2.0):
+    """Print a hint when an OBJ looks like a single component rather than a
+    whole rocket. Returns True if the hint was printed."""
+    aspect = axis_aspect_ratio(V, nose_axis)
+    if aspect and aspect < min_aspect:
+        print(f"Note: this model is only {aspect:.1f}x longer than it is wide, which "
+              f"looks like a single component (a fin set, a nose cone) rather than a "
+              f"whole rocket.\n      If you meant to export the entire airframe, "
+              f"re-export with every component selected.")
+        return True
+    return False
 
 
 MARKER_COLOR = GLYPH_COLORS["fin_marked"]

@@ -6,7 +6,7 @@ import pytest
 from blueraven_visualizer.mesh import (
     load_obj, rocket_primitive, decimate_mesh, glyph_face_colors, GLYPH_COLORS,
     shade_triangles, angular_roll_marker, solid_color_with_marker, MARKER_COLOR,
-    detect_nose_axis,
+    detect_nose_axis, axis_aspect_ratio, warn_if_partial_model,
 )
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -263,3 +263,37 @@ def test_detect_nose_axis_picks_the_tapered_end_as_the_nose():
 def test_detect_nose_axis_survives_a_degenerate_flat_model():
     flat = np.zeros((10, 3))
     assert detect_nose_axis(flat) in ("+x", "+y", "+z")
+
+
+def test_detect_nose_axis_is_not_fooled_when_fins_are_wider_than_the_body_is_long():
+    """Regression guard from a real user file: a bare fin-set export spans
+    5.45 across the fins but only 5.08 along the body, so picking the
+    longest bounding-box dimension chooses the fin axis and lays the model
+    on its side. Variance over all the vertices gets it right."""
+    # fins radiating in x/y, body axis along z, deliberately fin-span-dominant
+    body = np.c_[np.zeros(40), np.zeros(40), np.linspace(0, 5.08, 40)]
+    fins = np.array([[2.72, 0, 0.5], [-2.72, 0, 0.5], [0, 2.72, 0.5], [0, -2.72, 0.5]])
+    V = np.vstack([body, fins])
+    assert (V.max(0) - V.min(0))[0] > (V.max(0) - V.min(0))[2]   # bbox says x
+    assert detect_nose_axis(V) == "+z"                            # variance says z
+
+
+def test_axis_aspect_ratio_separates_whole_rockets_from_single_components():
+    V, _, _ = rocket_primitive()
+    assert axis_aspect_ratio(V) > 1.0
+
+    flat_fin_set = np.array([[2.7, 0, 0], [-2.7, 0, 0], [0, 2.7, 0],
+                             [0, -2.7, 0], [0, 0, 5.1], [0, 0, 0]])
+    assert axis_aspect_ratio(flat_fin_set) < 2.0
+
+
+def test_warn_if_partial_model_only_fires_for_stubby_models(capsys):
+    fin_set = np.array([[2.7, 0, 0], [-2.7, 0, 0], [0, 2.7, 0],
+                        [0, -2.7, 0], [0, 0, 5.1], [0, 0, 0]])
+    assert warn_if_partial_model(fin_set) is True
+    assert "single component" in capsys.readouterr().out
+
+    slender = np.array([[0.5, 0, 0], [-0.5, 0, 0], [0, 0.5, 0],
+                        [0, -0.5, 0], [0, 0, 40.0], [0, 0, 0]])
+    assert warn_if_partial_model(slender) is False
+    assert capsys.readouterr().out == ""

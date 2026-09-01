@@ -26,6 +26,7 @@ from .quaternion import quat_rotmat, align_rotation, nose_vec
 from .mesh import (
     load_obj, rocket_primitive, decimate_mesh, glyph_face_colors, shade_triangles,
     angular_roll_marker, solid_color_with_marker, detect_nose_axis,
+    warn_if_partial_model,
 )
 from .events import first_true_time, nearest, detect_peak_accel
 from .report import build_report
@@ -119,6 +120,7 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         if obj:
             print(f"Model's long axis detected as {model_nose} "
                   f"(override with --model-nose if the rocket looks mis-oriented).")
+            warn_if_partial_model(V, model_nose)
     V = (align_rotation(nose_vec(model_nose), [1, 0, 0]) @ V.T).T   # nose -> +X
     Rmax = float(np.linalg.norm(V, axis=1).max())
 
@@ -379,64 +381,44 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     use_blit = blit
     blit_bg = {"data": None}
 
-    def capture_blit_background():
+    def paint_animated():
+        """Draw the animated artists onto whatever is currently on canvas."""
+        for a in anim_artists:
+            a.axes.draw_artist(a)
+        fig.canvas.blit(fig.bbox)
+
+    def on_draw(_event):
+        """Re-establish blitting after ANY full canvas draw.
+
+        Animated artists are skipped by normal draws, so every full redraw
+        leaves the canvas holding exactly the static background we want to
+        cache - and leaves our artists off-screen until we paint them back.
+        Hooking draw_event covers every source of a full redraw with one
+        rule: the GUI's own first paint when the window opens (which is why
+        painting once before show() wasn't enough - a real backend redraws
+        on realize and wiped it, leaving an empty 3D panel and a blank Play
+        button until the user clicked something), window resizes, and the
+        3D axes' mouse-drag rotate/pan/zoom, which ends in its own
+        independent draw_idle() and would otherwise leave our cached
+        background stale enough to snap the camera back on the next update.
+        """
         if not use_blit:
             return
-        for a in anim_artists:
-            a.set_visible(False)
-        fig.canvas.draw()
         blit_bg["data"] = fig.canvas.copy_from_bbox(fig.bbox)
-        for a in anim_artists:
-            a.set_visible(True)
+        paint_animated()
 
     def fast_redraw():
         if use_blit and blit_bg["data"] is not None:
             fig.canvas.restore_region(blit_bg["data"])
-            for a in anim_artists:
-                a.axes.draw_artist(a)
-            fig.canvas.blit(fig.bbox)
+            paint_animated()
         else:
             fig.canvas.draw_idle()
-
-    def camera_state():
-        if not show_3d:
-            return None
-        return (ax3d.azim, ax3d.elev, ax3d.get_xlim3d(), ax3d.get_ylim3d(), ax3d.get_zlim3d())
 
     if use_blit:
         for a in anim_artists:
             a.set_animated(True)
-        # The 3D axes' own mouse-drag rotate/pan/zoom (Axes3D._on_move) ends
-        # with its own independent, full canvas.draw_idle() - it's not part
-        # of, and knows nothing about, our blit setup. That full redraw
-        # itself looks correct in the moment, but our cached background
-        # snapshot is now stale (captured at the old camera angle): the very
-        # next slider/play/step update would call fast_redraw(), which
-        # restores that stale background and silently snaps the view back
-        # to wherever it was before the user rotated it. Recapturing after
-        # every mouse-button release fixes that (it covers the end of a
-        # rotate/pan/zoom drag) - but a release also fires for every button/
-        # slider click, which never touch the camera, so gate the (costly)
-        # recapture on the camera actually having moved rather than paying
-        # for a full redraw on every click.
-        last_camera = {"state": camera_state()}
-
-        def recapture_if_camera_moved(_evt):
-            now = camera_state()
-            if now != last_camera["state"]:
-                last_camera["state"] = now
-                capture_blit_background()
-
-        fig.canvas.mpl_connect("resize_event", lambda evt: capture_blit_background())
-        fig.canvas.mpl_connect("button_release_event", recapture_if_camera_moved)
-        capture_blit_background()
-        # capture_blit_background() hides the animated artists, does a full
-        # draw to snapshot the static background, then unhides them - but
-        # that full draw is what's left on screen, so without painting them
-        # back the window opens with an EMPTY 3D panel (no rocket, no
-        # cursors) until the user happens to touch a control. Blit them on
-        # once here so the very first frame is visible.
-        fast_redraw()
+        fig.canvas.mpl_connect("draw_event", on_draw)
+        fig.canvas.draw()
 
     def sync_slider(i):
         sld.eventson = False
