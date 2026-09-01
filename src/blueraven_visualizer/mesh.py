@@ -97,6 +97,32 @@ def rocket_primitive(n=24, body=2.0, nose=1.0, r=0.35, fin_count=4,
     return V, np.array(tris, int), np.array(parts, dtype=object)
 
 
+MARKER_COLOR = GLYPH_COLORS["fin_marked"]
+
+
+def angular_roll_marker(V, F, width_deg=16):
+    """Boolean mask (len(F),) marking faces within a narrow angular wedge
+    around the model's local long axis (+X, after the usual nose->+X
+    alignment). A real imported OBJ has no per-part labels to build a
+    glyph_face_colors()-style marker from (no "this face is the marked
+    fin"), so this gives any mesh - however it's actually built - the same
+    kind of roll-visibility marker: a stripe that runs the model's full
+    length at a fixed angle in its own body frame, so it rotates rigidly
+    with the mesh and stays visible as a spin reference regardless of what
+    the geometry itself represents."""
+    centroids = V[F].mean(axis=1)
+    angle = np.degrees(np.arctan2(centroids[:, 2], centroids[:, 1]))
+    return np.abs(angle) <= (width_deg / 2)
+
+
+def solid_color_with_marker(base_color, marker_mask, marker_color=MARKER_COLOR):
+    """RGB array (len(marker_mask), 3): base_color everywhere, marker_color
+    on the faces angular_roll_marker() picked out."""
+    colors = np.tile(np.asarray(base_color, dtype=float), (len(marker_mask), 1))
+    colors[marker_mask] = marker_color
+    return colors
+
+
 def glyph_face_colors(parts, highlight=None):
     """RGB array (len(parts), 3) for the glyph's paint scheme. If `highlight`
     is given (an RGB color), every face except the roll marker (the marked

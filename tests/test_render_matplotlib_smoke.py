@@ -49,6 +49,25 @@ def test_visualize_no_3d(tmp_path):
     assert out.exists()
 
 
+def test_max_faces_auto_uses_full_detail_for_export(capsys, tmp_path):
+    """Regression guard: interactive playback needs decimation to redraw
+    fast, but a one-time export doesn't hit that live frame-rate
+    constraint - so the default ("auto") should give exports the full,
+    undecimated mesh instead of quietly reusing the interactive cap and
+    crushing fine geometry (fins, panel seams) for no reason."""
+    out = tmp_path / "full_detail.gif"
+    visualize(EXAMPLE_HR, EXAMPLE_LR, obj=EXAMPLE_OBJ, window="shred", pad=0.2,
+              fps=4, record=str(out))
+    assert "Mesh decimated" not in capsys.readouterr().out
+    assert out.exists()
+
+
+def test_max_faces_auto_still_caps_for_interactive_playback(capsys):
+    visualize(EXAMPLE_HR, EXAMPLE_LR, obj=EXAMPLE_OBJ, window=[6.0, 6.5],
+              fps=8, record=None)
+    assert "Mesh decimated" in capsys.readouterr().out
+
+
 def test_visualize_bundled_example_with_real_textured_obj(tmp_path):
     """End-to-end against the exact files shipped in examples/ - catches
     problems in the bundled data itself (e.g. a mangled OBJ/MTL path fix),

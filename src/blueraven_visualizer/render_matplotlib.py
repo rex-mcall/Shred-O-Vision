@@ -23,7 +23,10 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from .dialogs import ASK, resolve_files
 from .io import load_blueraven
 from .quaternion import quat_rotmat, align_rotation, nose_vec
-from .mesh import load_obj, rocket_primitive, decimate_mesh, glyph_face_colors, shade_triangles
+from .mesh import (
+    load_obj, rocket_primitive, decimate_mesh, glyph_face_colors, shade_triangles,
+    angular_roll_marker, solid_color_with_marker,
+)
 from .events import first_true_time, nearest, detect_shred
 from .report import build_report
 
@@ -34,11 +37,22 @@ SHRED_COLOR = (0.85, 0.06, 0.10)
 def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
               model_nose="+z", upright_start=True, shred_highlight=True,
               fps=30, speed=1.0, record=None, decim_plot=5,
-              show_3d=True, max_faces=10000, dpi=100, blit=True):
+              show_3d=True, max_faces="auto", dpi=100, blit=True):
 
     # ---- resolve files (pops dialogs for any left as ASK) ----
     hr_csv, lr_csv, obj = resolve_files(hr_csv, lr_csv, obj)
     has_lr = lr_csv is not None
+
+    if max_faces == "auto":
+        # Interactive playback needs to redraw many times a second, so a
+        # detailed real-world OBJ (tens of thousands of faces) has to be
+        # decimated to stay smooth. A one-time video export doesn't have
+        # that constraint - it just needs to finish rendering in a
+        # reasonable total time, not hit a live frame budget - so give it
+        # the full, undecimated mesh instead: much better fin/panel detail
+        # in the saved clip, at the cost of a slower (but still one-time)
+        # export.
+        max_faces = None if record else 10000
 
     # ---- load ----
     _, hc = load_blueraven(hr_csv)
@@ -103,6 +117,13 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     V = (align_rotation(nose_vec(model_nose), [1, 0, 0]) @ V.T).T   # nose -> +X
     Rmax = float(np.linalg.norm(V, axis=1).max())
 
+    # A real imported OBJ has no per-part labels to build a roll marker from
+    # the way the built-in glyph's parts do - so give it the same kind of
+    # spin-visibility stripe based on angular position around the model's
+    # own long axis instead, which works on any mesh regardless of what its
+    # geometry actually represents.
+    roll_marker = angular_roll_marker(V, F) if parts is None else None
+
     v0 = quat_rotmat(Q[nearest(t_hr, win[0])]) @ np.array([1.0, 0, 0])
     Rworld = align_rotation(v0, [0, 0, 1]) if upright_start else np.eye(3)
 
@@ -135,10 +156,13 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     if parts is not None:
         face_colors_normal = glyph_face_colors(parts)
         face_colors_shred = glyph_face_colors(parts, highlight=SHRED_COLOR)
+    elif roll_marker is not None:
+        face_colors_normal = solid_color_with_marker(BASE_COLOR, roll_marker)
+        face_colors_shred = solid_color_with_marker(SHRED_COLOR, roll_marker)
 
     mesh = hud = None
     if show_3d:
-        mesh = Poly3DCollection(V[F], facecolor=(face_colors_normal if parts is not None else BASE_COLOR),
+        mesh = Poly3DCollection(V[F], facecolor=(face_colors_normal if face_colors_normal is not None else BASE_COLOR),
                                 edgecolor="none")
         ax3d.add_collection3d(mesh)
         # The axis box has to be a symmetric cube sized to fit the model at
@@ -218,7 +242,7 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             tri = Vk[F]
             mesh.set_verts(tri)
             post = (not np.isnan(tShred)) and tf >= tShred
-            if parts is not None:
+            if face_colors_normal is not None:
                 base = face_colors_shred if (post and shred_highlight) else face_colors_normal
             else:
                 base = SHRED_COLOR if (post and shred_highlight) else BASE_COLOR

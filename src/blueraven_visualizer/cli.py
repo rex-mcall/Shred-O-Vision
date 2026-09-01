@@ -48,8 +48,10 @@ def build_parser():
     ap.add_argument("--record", default=None, help="output .mp4/.gif (else interactive)")
     ap.add_argument("--no-3d", action="store_true",
                      help="[matplotlib only] telemetry only (scrubs instantly)")
-    ap.add_argument("--max-faces", type=int, default=10000,
-                    help="[matplotlib only] decimate the model to this many faces (-1 = no limit)")
+    ap.add_argument("--max-faces", type=int, default=None,
+                    help="[matplotlib only] decimate the model to this many faces "
+                         "(-1 = no limit; default: full detail for --record exports, "
+                         "10000 for interactive playback)")
     ap.add_argument("--dpi", type=int, default=100, help="[matplotlib only] figure DPI (lower = faster)")
     ap.add_argument("--no-blit", action="store_true",
                      help="[matplotlib only] disable blitting in 2D-only mode")
@@ -85,9 +87,16 @@ def main(argv=None):
     obj = _parse_optional(a.obj)
     window = _parse_window(a.window)
 
+    if a.max_faces is None:
+        max_faces = "auto"
+    elif a.max_faces < 0:
+        max_faces = None
+    else:
+        max_faces = a.max_faces
+
     _run(a.hr_csv, lr_csv, obj, a.renderer, window, a.record,
          pad=a.pad, model_nose=a.model_nose, fps=a.fps, speed=a.speed,
-         show_3d=not a.no_3d, max_faces=(None if a.max_faces < 0 else a.max_faces),
+         show_3d=not a.no_3d, max_faces=max_faces,
          dpi=a.dpi, blit=not a.no_blit)
 
 

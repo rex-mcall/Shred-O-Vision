@@ -5,7 +5,7 @@ import pytest
 
 from blueraven_visualizer.mesh import (
     load_obj, rocket_primitive, decimate_mesh, glyph_face_colors, GLYPH_COLORS,
-    shade_triangles,
+    shade_triangles, angular_roll_marker, solid_color_with_marker, MARKER_COLOR,
 )
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -118,3 +118,50 @@ def test_shade_triangles_output_clipped_to_valid_color_range():
     colors = shade_triangles((1.0, 1.0, 1.0), tri, light_dir=(0, 0, 1), ambient=1.5)
     assert colors.min() >= 0
     assert colors.max() <= 1
+
+
+def _face_at(x, deg, r=1.0):
+    """A tiny triangle whose centroid sits at angle `deg` around the local
+    +X axis, at position x along it - for angular_roll_marker tests."""
+    a = np.radians(deg)
+    y, z = r * np.cos(a), r * np.sin(a)
+    return [[x, y, z], [x + 0.01, y, z], [x, y + 0.001, z]]
+
+
+def _mesh_from_faces(face_specs):
+    V, F = [], []
+    for spec in face_specs:
+        tri = _face_at(*spec)
+        base = len(V)
+        V.extend(tri)
+        F.append([base, base + 1, base + 2])
+    return np.array(V), np.array(F)
+
+
+def test_angular_roll_marker_selects_only_faces_near_zero_degrees():
+    V, F = _mesh_from_faces([(0, 0), (0, 90), (0, 180), (0, -90)])
+    mask = angular_roll_marker(V, F, width_deg=16)
+    assert mask.tolist() == [True, False, False, False]
+
+
+def test_angular_roll_marker_spans_the_full_length_regardless_of_x():
+    """The marker is a stripe running the model's whole length, not a
+    localized patch - angle is the only criterion, independent of position
+    along the axis."""
+    V, F = _mesh_from_faces([(-10, 0), (0, 0), (10, 0), (40, 0)])
+    mask = angular_roll_marker(V, F, width_deg=16)
+    assert mask.all()
+
+
+def test_angular_roll_marker_respects_width():
+    V, F = _mesh_from_faces([(0, 5), (0, 20)])
+    assert angular_roll_marker(V, F, width_deg=16)[0]      # inside +-8 deg
+    assert not angular_roll_marker(V, F, width_deg=16)[1]  # outside
+
+
+def test_solid_color_with_marker_colors_only_marked_faces():
+    mask = np.array([True, False, True])
+    colors = solid_color_with_marker((0.5, 0.5, 0.5), mask)
+    assert np.allclose(colors[0], MARKER_COLOR)
+    assert np.allclose(colors[1], (0.5, 0.5, 0.5))
+    assert np.allclose(colors[2], MARKER_COLOR)
