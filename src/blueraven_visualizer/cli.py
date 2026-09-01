@@ -1,7 +1,9 @@
 """Command-line entry point. Dispatches to the matplotlib (default) or
-pyvista rendering backend."""
+pyvista rendering backend. Run with no arguments (or --menu) to get a
+plain-language guided wizard instead of flags - see menu.py."""
 
 import argparse
+import sys
 
 from .dialogs import ASK
 
@@ -25,11 +27,14 @@ def build_parser():
     ap = argparse.ArgumentParser(
         prog="blueraven-visualizer",
         description="Blue Raven orientation + telemetry dashboard. "
-                    "Omit file arguments to get pop-up file pickers.")
+                    "Omit all arguments for a guided menu (or pass --menu); "
+                    "omit just a file argument to get a pop-up file picker for it.")
     ap.add_argument("hr_csv", nargs="?", default=ASK, help="HR CSV (omit -> dialog)")
     ap.add_argument("lr_csv", nargs="?", default=ASK,
                      help="LR CSV; 'none' = orientation-only, no telemetry dashboard "
                           "(omit -> dialog, Cancel there also skips it)")
+    ap.add_argument("--menu", action="store_true",
+                     help="run the guided, plain-language wizard instead of using flags")
     ap.add_argument("--obj", default=ASK, help="OBJ model; 'none' = built-in glyph (omit -> dialog)")
     ap.add_argument("--renderer", choices=["matplotlib", "pyvista"], default="matplotlib",
                      help="matplotlib (default, no extra deps, full telemetry dashboard) or "
@@ -51,7 +56,28 @@ def build_parser():
     return ap
 
 
+def _run(hr_csv, lr_csv, obj, renderer, window, record, **matplotlib_only):
+    if renderer == "pyvista":
+        from . import render_pyvista as backend
+        backend.visualize(hr_csv, obj, window=window, record=record,
+                           **{k: v for k, v in matplotlib_only.items()
+                              if k in ("pad", "model_nose", "fps", "speed")})
+    else:
+        from . import render_matplotlib as backend
+        backend.visualize(hr_csv, lr_csv, obj, window=window, record=record, **matplotlib_only)
+
+
 def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if not argv or "--menu" in argv:
+        from .menu import run_menu
+        choices = run_menu()
+        _run(choices["hr_csv"], choices["lr_csv"], choices["obj"], choices["renderer"],
+             choices["window"], choices["record"])
+        return
+
     ap = build_parser()
     a = ap.parse_args(argv)
 
@@ -59,18 +85,10 @@ def main(argv=None):
     obj = _parse_optional(a.obj)
     window = _parse_window(a.window)
 
-    if a.renderer == "pyvista":
-        from . import render_pyvista as backend
-        backend.visualize(a.hr_csv, obj, window=window, pad=a.pad,
-                           model_nose=a.model_nose, fps=a.fps, speed=a.speed,
-                           record=a.record)
-    else:
-        from . import render_matplotlib as backend
-        backend.visualize(a.hr_csv, lr_csv, obj, window=window, pad=a.pad,
-                           model_nose=a.model_nose, fps=a.fps, speed=a.speed,
-                           record=a.record, show_3d=not a.no_3d,
-                           max_faces=(None if a.max_faces < 0 else a.max_faces),
-                           dpi=a.dpi, blit=not a.no_blit)
+    _run(a.hr_csv, lr_csv, obj, a.renderer, window, a.record,
+         pad=a.pad, model_nose=a.model_nose, fps=a.fps, speed=a.speed,
+         show_3d=not a.no_3d, max_faces=(None if a.max_faces < 0 else a.max_faces),
+         dpi=a.dpi, blit=not a.no_blit)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,24 @@ Built for post-flight forensics: pinpoint exactly when and how a rocket lost sta
   | OBJ textures/materials | No (flat-shaded silhouette) | Yes, real per-part textures via VTK's OBJ importer |
   | Rendering | Software (matplotlib `mplot3d`) | Hardware-accelerated |
 
+## No command-line experience? Start here
+
+Run `blueraven-visualizer` with nothing after it (or double-click `run.py`, or hit Run in VS Code) and you get a guided, plain-language wizard instead of flags to remember - it asks a few yes/no and numbered questions in the terminal and pops a file-picker window at the right moments:
+
+```
+============================================================
+  Blue Raven Visualizer - guided setup
+============================================================
+Answer a few questions to get started - press Enter to accept
+the default for anything you're not sure about.
+
+Step 1 of 5: pick your flight-computer files.
+A window will open - navigate to your Blue Raven CSV export.
+Press Enter to choose the HIGH-RATE (HR) CSV file...
+```
+
+Everything below this point (the `--flag` examples) is for when you want more control.
+
 ## Install
 
 ```bash
@@ -40,8 +58,10 @@ pip install -e ".[pyvista]"
 ## Usage
 
 ```bash
-# pop-up file pickers for each file
+# guided wizard (see "No command-line experience?" above)
 blueraven-visualizer
+# same wizard, even if other flags are present
+blueraven-visualizer --menu
 
 # explicit files, interactive scrub/play viewer
 blueraven-visualizer HR.csv LR.csv --obj my_rocket.obj
@@ -95,6 +115,8 @@ Every run also prints a flight report to the console:
   Main fired             --
 ----------------------------------------------------------
 ```
+
+> **A note on OBJ models:** because the rocket tumbles freely, the 3D view has to fit your whole model at any rotation without distorting it - so a very slender model (long body, small diameter), or one exported as an "exploded" CAD diagram with gaps between parts, will look thin no matter how the camera is tuned. An assembled, non-exploded model looks best.
 
 ## CSV format
 

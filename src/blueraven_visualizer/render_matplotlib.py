@@ -94,7 +94,12 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
                   f"(raise max_faces, or set max_faces=None for MP4 export).")
     else:
         V, F, parts = rocket_primitive()   # small enough it never needs decimation
-    V = V - V.mean(0)
+    # Center on the bounding-box midpoint, not the vertex mean: real OBJ
+    # exports are often unevenly tessellated (e.g. a finely-meshed tail
+    # section next to a coarse nosecone), which skews the mean well off the
+    # object's actual visual center and inflates Rmax below - wasting frame
+    # space around a model that then looks tiny/needle-thin.
+    V = V - (V.min(0) + V.max(0)) / 2
     V = (align_rotation(nose_vec(model_nose), [1, 0, 0]) @ V.T).T   # nose -> +X
     Rmax = float(np.linalg.norm(V, axis=1).max())
 
@@ -136,12 +141,17 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         mesh = Poly3DCollection(V[F], facecolor=(face_colors_normal if parts is not None else BASE_COLOR),
                                 edgecolor="none")
         ax3d.add_collection3d(mesh)
+        # The axis box has to be a symmetric cube sized to fit the model at
+        # ANY rotation (it tumbles), so a slender model - long body, small
+        # diameter - will always show some empty margin. Keep that margin
+        # tight (not the ~50% used previously) so the model actually reads
+        # as a rocket instead of a thin sliver lost in empty space.
         for setlim in (ax3d.set_xlim, ax3d.set_ylim, ax3d.set_zlim):
-            setlim(-Rmax * 1.5, Rmax * 1.5)
+            setlim(-Rmax * 1.12, Rmax * 1.12)
         ax3d.set_box_aspect((1, 1, 1))
         ax3d.set_xlabel("X"); ax3d.set_ylabel("Y"); ax3d.set_zlabel("Z (up)")
         ax3d.view_init(elev=16, azim=-60)
-        up = Rworld @ v0 * Rmax * 1.4
+        up = Rworld @ v0 * Rmax * 1.05
         ax3d.plot([0, up[0]], [0, up[1]], [0, up[2]], "--", color="0.6", lw=1)
         hud = ax3d.text2D(0.02, 0.97, "", transform=ax3d.transAxes, va="top",
                           fontsize=10, family="monospace")

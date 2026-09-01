@@ -7,10 +7,11 @@ package.module`) - this thin wrapper uses a plain absolute import instead,
 which works either way as long as the package is installed (`pip install -e
 .`) in whatever interpreter is running it.
 
-With no arguments (i.e. just clicking Run) this pops native file-picker
-dialogs for the HR CSV, LR CSV, and OBJ model - same as running the CLI
-with no arguments. To pass real arguments instead, either edit sys.argv
-below, or run `blueraven-visualizer ...` / `python -m blueraven_visualizer.cli ...`
+With no arguments (i.e. just clicking Run) this launches the guided,
+plain-language wizard (see menu.py) - it asks a few questions in the
+terminal and pops native file-picker dialogs at the right moments. To use
+flags instead, either edit sys.argv below, or run
+`blueraven-visualizer ...` / `python -m blueraven_visualizer.cli ...`
 from a terminal.
 """
 
