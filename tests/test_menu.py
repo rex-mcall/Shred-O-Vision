@@ -42,7 +42,7 @@ def test_menu_picks_lr_and_obj_and_exports(monkeypatch):
 
     inputs = iter([
         "1",   # display mode -> matplotlib (still first option)
-        "2",   # window -> zoom to peak acceleration
+        "3",   # window -> zoom to peak acceleration
         "1",   # mark peak? -> no
         "2",   # action -> export
         "1",   # format -> mp4
@@ -120,3 +120,24 @@ def test_menu_exits_cleanly_if_no_hr_file_selected(monkeypatch):
         assert False, "expected SystemExit"
     except SystemExit as exc:
         assert exc.code == 0
+
+
+def test_menu_window_default_is_launch_through_apogee(monkeypatch):
+    """The descent is a long, uneventful canopy ride (88 s of the 105 s
+    bundled flight), so the default skips it."""
+    def fake_pick_file(title, *a, **k):
+        return "/fake/hr.csv" if "HIGH-RATE" in title else None
+
+    monkeypatch.setattr("builtins.input", lambda *a: "")
+    monkeypatch.setattr(menu, "pick_file", fake_pick_file)
+    assert menu.run_menu()["window"] is None      # None = launch through apogee
+
+
+def test_menu_can_still_ask_for_the_entire_recording(monkeypatch):
+    def fake_pick_file(title, *a, **k):
+        return "/fake/hr.csv" if "HIGH-RATE" in title else None
+
+    inputs = iter(["", "2", "", ""])              # window -> entire recording
+    monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
+    monkeypatch.setattr(menu, "pick_file", fake_pick_file)
+    assert menu.run_menu()["window"] == "full"

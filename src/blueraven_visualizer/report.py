@@ -36,7 +36,7 @@ def build_report(t_hr, accel_mag, gyro_mag, *, t_lr=None, lc=None):
     lines = [_RULE, "  BLUE RAVEN FLIGHT REPORT", _RULE]
 
     tBurn = None
-    machMax = None
+    machAtVmax = None
     has_lr = t_lr is not None and lc is not None
 
     if has_lr:
@@ -52,16 +52,33 @@ def build_report(t_hr, accel_mag, gyro_mag, *, t_lr=None, lc=None):
         tApoF = first_true_time(t_lr, lc("Apo_fired") > 0.5)
         tMainF = first_true_time(t_lr, lc("Main_fired") > 0.5)
 
-        iVmax = int(np.argmax(vup))
+        # Restrict the max-velocity search to the ascent. The Blue Raven's
+        # inertial velocities drift badly once the airframe is tumbling or
+        # under canopy - on the bundled flight the final sample reads
+        # |v| = 3104 ft/s - so a whole-flight maximum reports descent noise
+        # as if it were flight performance.
+        ascent = np.ones_like(t_lr, dtype=bool)
+        if not np.isnan(tApo):
+            ascent = t_lr <= tApo
+
+        iVmax = int(np.argmax(np.where(ascent, vup, -np.inf)))
         vMax, tVmax = float(vup[iVmax]), float(t_lr[iVmax])
         iAlt = int(np.argmax(alt))
         altMax, tAlt = float(alt[iAlt]), float(t_lr[iAlt])
 
         if vdr is not None and vcr is not None and tempF is not None:
-            mach = mach_number(vup, vdr, vcr, tempF)
-            machMax = float(np.nanmax(mach))
+            # Mach AT THE MAX-VELOCITY INSTANT, not the flight-wide maximum:
+            # this line reads "<v> ft/s (Mach <m>)", so both numbers have to
+            # describe the same moment. Taking a separate global max paired
+            # 1602 ft/s at T+6.28 s with Mach 2.67 from T+103.28 s - the last
+            # sample of the flight, where the inertial solution had already
+            # diverged. Uses the full 3D speed, so it can sit a hair above
+            # vertical-velocity/speed-of-sound.
+            machAtVmax = float(mach_number(vup[iVmax], vdr[iVmax],
+                                           vcr[iVmax], tempF[iVmax]))
 
-        vel_extra = f"{vMax:.0f} ft/s" + (f"  (Mach {machMax:.2f})" if machMax is not None else "")
+        vel_extra = f"{vMax:.0f} ft/s" + (f"  (Mach {machAtVmax:.2f})"
+                                          if machAtVmax is not None else "")
         _rep(lines, "Liftoff", tLift)
         _rep(lines, "Burnout (flag)", tBurn)
         _rep(lines, "Max velocity", tVmax, vel_extra)

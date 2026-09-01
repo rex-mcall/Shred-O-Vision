@@ -75,7 +75,8 @@ def run_menu():
 
     window = _choice(
         "What part of the flight do you want to see?",
-        [("The entire flight (recommended)", None),
+        [("Launch through apogee (recommended - skips the long descent)", None),
+         ("The entire recording, including the descent", "full"),
          ("Zoom in on the peak-acceleration moment "
           "(max thrust on a normal flight; the break on a failure)", "peak")],
     )
@@ -115,7 +116,9 @@ def run_menu():
     print(f"  LR file:   {lr_csv or '(none)'}")
     print(f"  3D model:  {obj or '(generic rocket shape)'}")
     print(f"  Display:   {renderer_label}")
-    print(f"  Window:    {'peak-acceleration moment' if window else 'entire flight'}")
+    window_label = {None: "launch through apogee", "full": "entire recording",
+                    "peak": "peak-acceleration moment"}.get(window, str(window))
+    print(f"  Window:    {window_label}")
     print(f"  Mark peak: {'yes' if highlight_peak else 'no'}")
     print(f"  Action:    {'save video to ' + record if record else 'watch interactively'}")
     print(f"{_RULE}\n")

@@ -9,7 +9,7 @@ from .dialogs import ASK
 
 
 def _parse_window(w):
-    if w and w not in ("peak", "shred"):
+    if w and w not in ("peak", "shred", "full"):
         return [float(x) for x in w.split(",")]
     return w
 
@@ -41,9 +41,11 @@ def build_parser():
                           "pyvista (textured/hardware-accelerated 3D view only, needs the "
                           "'pyvista' extra)")
     ap.add_argument("--window", default=None,
-                     help="'peak' (zoom to the peak-acceleration instant) or 't0,t1'; "
-                          "default is the whole flight. 'shred' is accepted as an alias "
-                          "for 'peak'.")
+                     help="what stretch of the flight to play. Default: launch through "
+                          "apogee (the descent is usually a long, uneventful canopy ride). "
+                          "'full' = the entire recording, 'peak' = zoom to the "
+                          "peak-acceleration instant, or an explicit 't0,t1'. "
+                          "'shred' is accepted as an alias for 'peak'.")
     ap.add_argument("--highlight-peak", action="store_true",
                      help="turn the model red for the rest of the flight once peak "
                           "acceleration is passed - useful when analyzing a structural "

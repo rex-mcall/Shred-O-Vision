@@ -90,13 +90,25 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
 
     # ---- playback window ----
     t_win_src = t_lr if has_lr else t_hr
+    t_start, t_end = float(t_win_src[0]), float(t_win_src[-1])
+    t_apogee = events.get("apogee", np.nan)
+
     if window in ("peak", "shred"):
         win = (t_peak_g - pad, t_peak_g + pad)
+    elif window == "full":
+        win = (t_start, t_end)
     elif window:
         win = tuple(window)
+    elif not np.isnan(t_apogee):
+        # Default: the part of the flight that's actually worth watching -
+        # pad through apogee. Everything after it is a long descent under
+        # canopy (88 s of it on the bundled flight, most of the recording),
+        # during which the orientation view has little to show. Pass
+        # --window full for the whole thing.
+        win = (t_start, t_apogee)
     else:
-        win = (float(t_win_src[0]), float(t_win_src[-1]))
-    win = (max(win[0], t_win_src[0]), min(win[1], t_win_src[-1]))
+        win = (t_start, t_end)
+    win = (max(win[0], t_start), min(win[1], t_end))
 
     # ---- model ----
     parts = None
@@ -279,52 +291,72 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     draw(win[0])
 
     # ---- record or show ----
-    from matplotlib.animation import FuncAnimation, FFMpegWriter
     if record:
-        anim = FuncAnimation(fig, lambda i: draw(frame_times[i]),
-                             frames=len(frame_times), interval=1000 / fps, blit=False)
         ext = os.path.splitext(record)[1].lower()
         if ext not in (".mp4", ".gif"):
             raise ValueError(
                 f"Can't tell what format to save as: {record!r} needs to end in "
                 f".mp4 or .gif."
             )
-        # A whole-flight export is easily ~1000 frames and can take minutes;
-        # without this it looks like the program has simply hung. Short clips
-        # finish fast enough that per-frame chatter is just noise.
+
+        # Render frames by BLITTING, not by a full canvas draw each time.
+        # Measured on this 5-axis figure: a full redraw costs ~280 ms/frame
+        # before the rocket is even considered - that's matplotlib rebuilding
+        # axis chrome, ticks and font metrics that never change between
+        # frames - while only the mesh, HUD and time cursors actually move.
+        # Reusing a cached background and redrawing just those cuts the
+        # fixed cost to a few ms and leaves only the mesh's own draw time.
+        animated = ([mesh, hud] if show_3d else []) + cursors
+        for a in animated:
+            a.set_animated(True)
+        fig.canvas.draw()
+        background = fig.canvas.copy_from_bbox(fig.bbox)
+
+        def render_frame(tf):
+            draw(tf)
+            fig.canvas.restore_region(background)
+            for a in animated:
+                a.axes.draw_artist(a)
+            fig.canvas.blit(fig.bbox)
+            return np.asarray(fig.canvas.buffer_rgba())
+
         n_total = len(frame_times)
         print(f"Rendering {n_total} frames to {record} ...")
         show_progress = n_total >= 100
-        step = max(1, n_total // 10)
+        progress_step = max(1, n_total // 10)
 
-        def on_progress(i, n):
-            if show_progress and i and (i % step == 0 or i == n_total - 1):
+        def note_progress(i):
+            if show_progress and i and (i % progress_step == 0 or i == n_total - 1):
                 print(f"  {i + 1}/{n_total} frames ({(i + 1) / n_total:.0%})", flush=True)
 
         if ext == ".gif":
-            anim.save(record, writer="pillow", fps=fps, progress_callback=on_progress)
+            from PIL import Image
+            frames = []
+            for i, tf in enumerate(frame_times):
+                frames.append(Image.fromarray(render_frame(tf).copy()).convert("P",
+                                                                               palette=Image.ADAPTIVE))
+                note_progress(i)
+            frames[0].save(record, save_all=True, append_images=frames[1:],
+                           duration=int(1000 / fps), loop=0)
         else:
-            if not FFMpegWriter.isAvailable():
-                # No system ffmpeg on PATH - fall back to the ffmpeg binary
-                # bundled by imageio-ffmpeg (a core dependency), so MP4
-                # export works out of the box without a system install.
-                try:
-                    import imageio_ffmpeg
-                    import matplotlib
-                    matplotlib.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
-                except ImportError:
-                    pass
-            if not FFMpegWriter.isAvailable():
-                raise RuntimeError(
-                    f"Can't write {record}: no usable ffmpeg found (checked PATH and the "
-                    f"bundled imageio-ffmpeg copy). Record to a .gif instead - no extra "
-                    f"install needed for that."
-                )
-            anim.save(record, writer="ffmpeg", fps=fps, dpi=110,
-                      progress_callback=on_progress)
+            # imageio-ffmpeg ships its own ffmpeg binary (it's a core
+            # dependency), so MP4 export needs nothing installed system-wide.
+            import imageio_ffmpeg
+            h, w = fig.canvas.get_width_height()[::-1]
+            writer = imageio_ffmpeg.write_frames(
+                record, (w, h), fps=fps, pix_fmt_in="rgba", quality=7,
+                ffmpeg_log_level="error",
+            )
+            writer.send(None)
+            try:
+                for i, tf in enumerate(frame_times):
+                    writer.send(render_frame(tf).tobytes())
+                    note_progress(i)
+            finally:
+                writer.close()
+
         plt.close(fig)
-        dur = len(frame_times) / fps
-        print(f"Saved {record}  ({len(frame_times)} frames, {dur:.1f}s)")
+        print(f"Saved {record}  ({n_total} frames, {n_total / fps:.1f}s)")
         return record
 
     # interactive: slider + play/pause/step/restart, with keyboard shortcuts

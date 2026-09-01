@@ -90,3 +90,44 @@ def test_visualize_bundled_example_with_real_textured_obj(tmp_path):
     assert result == str(out)
     assert out.exists()
     assert out.stat().st_size > 0
+
+
+def _window_seconds(fig):
+    """x-limits of a telemetry panel = the playback window actually used."""
+    return fig.axes[1].get_xlim()
+
+
+def test_default_window_is_launch_through_apogee():
+    """The descent is most of the recording (88 s of 105 s on the bundled
+    flight) and shows almost nothing in the orientation view, so the default
+    stops at apogee rather than playing the whole canopy ride."""
+    import matplotlib.pyplot as plt
+    fig = visualize(EXAMPLE_HR, EXAMPLE_LR, obj=None, record=None)
+    try:
+        t0, t1 = _window_seconds(fig)
+        assert t1 == pytest.approx(13.88, abs=0.5), "should end at baro apogee"
+        assert t0 < 0.5, "should start at the beginning of the data"
+    finally:
+        plt.close(fig)
+
+
+def test_window_full_plays_the_entire_recording():
+    import matplotlib.pyplot as plt
+    fig = visualize(EXAMPLE_HR, EXAMPLE_LR, obj=None, window="full", record=None)
+    try:
+        _, t1 = _window_seconds(fig)
+        assert t1 > 100, "'full' should run past apogee to the end of the data"
+    finally:
+        plt.close(fig)
+
+
+def test_default_window_falls_back_to_full_without_apogee_data():
+    """No LR file means no apogee flag - the whole HR recording is then the
+    only sensible default, rather than erroring or showing nothing."""
+    import matplotlib.pyplot as plt
+    fig = visualize(HR_SAMPLE, None, obj=None, record=None)
+    try:
+        t0, t1 = _window_seconds(fig)
+        assert t1 > 10, "should fall back to the full recording"
+    finally:
+        plt.close(fig)
