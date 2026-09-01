@@ -1,10 +1,10 @@
-# blueraven-visualizer
+# Shred-O-Vision
 
 Turns a [Featherweight Blue Raven](https://www.featherweightaltimeters.com/) flight-computer log into a 3D rocket-orientation animation, synced to a telemetry dashboard (pyro-charge voltages, altitude/velocity, tilt/roll).
 
 Replay any flight from the rocket's own point of view - a clean nominal flight or a breakup. It reports the key instants (liftoff, burnout, apogee, deployments, peak acceleration and angular rate) and leaves the interpretation to you; for failure analysis, `--window peak --highlight-peak` zooms to the peak-g instant and marks everything after it.
 
-![CI](https://github.com/rexmcall/blueraven-visualizer/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/rex-mcall/Shred-O-Vision/actions/workflows/ci.yml/badge.svg)
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 ## What it does
@@ -43,10 +43,13 @@ Everything below this point (the `--flag` examples) is for when you want more co
 ## Install
 
 ```bash
-git clone https://github.com/rexmcall/blueraven-visualizer.git
-cd blueraven-visualizer
+git clone https://github.com/rex-mcall/Shred-O-Vision.git
+cd Shred-O-Vision
 pip install -e .
 ```
+
+That installs the command `blueraven-visualizer` (with `shred-o-vision` as an
+alias for it - they're the same program).
 
 For the textured/hardware-accelerated backend, also install the optional extra:
 
