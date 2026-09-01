@@ -34,6 +34,19 @@ def align_rotation(a, b):
     return np.eye(3) + K + K @ K * ((1 - c) / s ** 2)
 
 
+def pose_rotation(Rworld, q, model_align=None):
+    """The full per-frame rotation applied to a model's RAW (untouched)
+    geometry: world-upright alignment, then the logged body attitude, then -
+    innermost, applied first - the model's own native-nose-axis-to-body+X
+    alignment. Omit model_align (or pass None/identity) only when the
+    geometry has already been pre-aligned so its nose is along +X (e.g. the
+    built-in glyph); any raw/unaligned mesh (e.g. an imported OBJ used as-is)
+    needs it, or it rotates around the wrong axis entirely."""
+    if model_align is None:
+        model_align = np.eye(3)
+    return Rworld @ quat_rotmat(q) @ model_align
+
+
 def nose_vec(s):
     """Parse a nose-direction spec like '+x', '-z' into a unit vector."""
     s = str(s).lower().strip()

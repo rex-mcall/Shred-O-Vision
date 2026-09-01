@@ -22,6 +22,7 @@ Built for post-flight forensics: pinpoint exactly when and how a rocket lost sta
   | Telemetry dashboard | Yes, full 4-panel layout | No — 3D orientation view only |
   | OBJ textures/materials | No (flat-shaded silhouette) | Yes, real per-part textures via VTK's OBJ importer |
   | Rendering | Software (matplotlib `mplot3d`) | Hardware-accelerated |
+  | Camera | Interactive (mouse-orbit) | Fixed and locked - a ground plane + a launch-vertical reference line stay put while the rocket tumbles, so it's easy to tell what's actually moving |
 
 ## No command-line experience? Start here
 
@@ -114,7 +115,7 @@ Every run also prints a flight report to the console:
 ----------------------------------------------------------
 ```
 
-> **A note on OBJ models:** because the rocket tumbles freely, the 3D view has to fit your whole model at any rotation without distorting it - so a very slender model (long body, small diameter), or one exported as an "exploded" CAD diagram with gaps between parts, will look thin no matter how the camera is tuned. An assembled, non-exploded model looks best.
+> **A note on OBJ models:** because the rocket tumbles freely, the matplotlib backend's 3D view has to fit your whole model at any rotation without distorting it - so a very slender model (long body, small diameter), or one exported as an "exploded" CAD diagram with gaps between parts, will look thin no matter how the camera is tuned. The pyvista backend doesn't have this limitation (its camera fits the model once rather than guaranteeing every rotation stays in frame), so it's the better choice for a detailed or slender model - an assembled, non-exploded model looks best either way.
 
 ## CSV format
 

@@ -31,6 +31,31 @@ def test_visualize_textured_example_obj(tmp_path):
     assert out.stat().st_size > 0
 
 
+def test_interactive_setup_locks_camera_and_adds_ground_reference(monkeypatch):
+    """Regression guard: mouse-driven camera rotation was disabled, and a
+    ground plane + launch-vertical reference line were added, because a
+    freely-orbitable camera with no spatial reference made it hard to tell
+    rocket motion from camera motion. Drives visualize() through its real
+    interactive-mode setup (everything up to plotter.show()) without
+    actually blocking on a live window."""
+    captured = {}
+    orig_show = pv.Plotter.show
+
+    def fake_show(self, *a, **k):
+        captured["style"] = type(self.iren.interactor.GetInteractorStyle()).__name__
+        captured["n_actors"] = len(self.renderer.actors)
+        self._closed = True   # let visualize()'s manual update loop exit immediately
+        return None
+
+    monkeypatch.setattr(pv.Plotter, "show", fake_show)
+    visualize(HR_SAMPLE, obj=None, window=[-1.0, 1.0], record=None)
+    monkeypatch.setattr(pv.Plotter, "show", orig_show)
+
+    assert captured["style"] == "vtkInteractorStyleUser"
+    # rocket + ground plane + reference line + HUD text, at minimum
+    assert captured["n_actors"] >= 4
+
+
 def test_glyph_actor_stays_bound_to_its_live_polydata():
     """Regression guard: add_mesh(..., smooth_shading=True) makes pyvista
     bind the actor's mapper to an internally-generated normals copy instead

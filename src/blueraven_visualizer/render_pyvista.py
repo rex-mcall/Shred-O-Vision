@@ -11,13 +11,14 @@ with wall-clock-paced play/pause (SPACE), step (arrow keys), and scrub
 --renderer matplotlib (the default) for that.
 """
 
+import math
 import os
 import time
 import numpy as np
 
 from .dialogs import ASK, resolve_files
 from .io import load_blueraven
-from .quaternion import quat_rotmat, align_rotation, nose_vec
+from .quaternion import quat_rotmat, align_rotation, nose_vec, pose_rotation
 from .mesh import rocket_primitive, glyph_face_colors
 from .events import nearest, detect_shred
 from .report import build_report
@@ -127,24 +128,64 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     else:
         bounds = np.array(plotter.bounds).reshape(3, 2)
         center = bounds.mean(axis=1)
+        # Unlike the glyph above (and the matplotlib backend's load_obj
+        # path), vtkOBJImporter loads the file's raw geometry as-is, in
+        # whatever local axis the model's own nose actually points along -
+        # for mmavenged.obj that's +Z, not +X. Without this, the per-frame
+        # rotation below (which assumes body +X is the nose, matching the
+        # Blue Raven quaternion convention) rotates the model around the
+        # wrong axis entirely: it visibly tumbles ~90 deg off from where the
+        # reported tilt/orientation actually is.
+        model_align = align_rotation(nose_vec(model_nose), [1, 0, 0])
 
     v0 = quat_rotmat(Q[nearest(t_hr, win[0])]) @ np.array([1.0, 0, 0])
     Rworld = align_rotation(v0, [0, 0, 1]) if upright_start else np.eye(3)
 
-    plotter.camera_position = "iso"
-    plotter.reset_camera()
+    # ---- camera: fixed, locked, side-on-with-elevation (matches the
+    # matplotlib backend's view_init(elev=16, azim=-60) convention, so a
+    # low-tilt rocket reads as "pointing up" on screen instead of the
+    # generic "iso" corner view, which draws even a perfectly vertical
+    # object as a diagonal line) ----
+    bounds = np.array(plotter.bounds).reshape(3, 2)
+    extent = float(np.linalg.norm(bounds[:, 1] - bounds[:, 0]))
+    elev, azim = math.radians(16), math.radians(-60)
+    direction = np.array([math.cos(elev) * math.cos(azim),
+                          math.cos(elev) * math.sin(azim),
+                          math.sin(elev)])
+    focal_point = tuple(center)
+    cam_pos = tuple(np.asarray(center) + direction * extent * 1.3)
+    plotter.camera_position = [cam_pos, focal_point, (0, 0, 1)]
     plotter.camera.zoom(0.85)   # headroom margin - better to show empty space than crop the model
+
+    # ---- ground plane + fixed launch-vertical reference line, so "up" and
+    # scale stay legible regardless of how the rocket itself is tumbling ----
+    ground_z = bounds[2, 0] - extent * 0.05
+    ground = pv.Plane(center=(center[0], center[1], ground_z), direction=(0, 0, 1),
+                      i_size=extent * 1.4, j_size=extent * 1.4)
+    plotter.add_mesh(ground, color=(0.88, 0.88, 0.88), show_edges=True,
+                     edge_color=(0.75, 0.75, 0.75), lighting=False)
+    ref_dir = Rworld @ v0
+    ref_top = np.asarray(center) + ref_dir * extent * 0.65
+    plotter.add_mesh(pv.Line(tuple(center), tuple(ref_top)), color=(0.6, 0.6, 0.6), line_width=2)
+
+    # Lock the camera: mouse drag/scroll on a tumbling rocket makes it very
+    # hard to tell rocket motion from camera motion, so the only view change
+    # comes from the rocket's own logged orientation.
+    plotter.iren.interactor.SetInteractorStyle(vtk.vtkInteractorStyleUser())
+
     plotter.add_text("", position="upper_left", font_size=12, name="hud")
 
     def apply_pose(tf):
         ih = nearest(t_hr, tf)
-        R = Rworld @ quat_rotmat(Q[ih])
         post = (not np.isnan(tShred)) and tf >= tShred
         if textured:
+            R = pose_rotation(Rworld, Q[ih], model_align)
             transform = _rotation_transform(R, center)
             for a in actors:
                 a.SetUserTransform(transform)
         else:
+            # base_points was already pre-aligned (nose -> +X) at construction
+            R = pose_rotation(Rworld, Q[ih])
             poly.points = (R @ base_points.T).T
             poly.cell_data["colors"] = (face_colors_shred if (post and shred_highlight)
                                         else face_colors_normal)
@@ -193,7 +234,7 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             state["wall_t0"] = time.perf_counter()
             state["data_t0"] = win[0] if state["t"] >= win[1] else state["t"]
 
-    def timer_tick(step):
+    def tick():
         if not state["playing"]:
             return
         elapsed = time.perf_counter() - state["wall_t0"]
@@ -219,9 +260,19 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     plotter.add_key_event("r", restart)
     plotter.add_key_event("Home", restart)
     plotter.add_key_event("End", lambda: set_pose(win[1]))
-    plotter.add_timer_event(max_steps=10_000_000, duration=20, callback=timer_tick)
 
     print("Controls: SPACE play/pause | drag slider to scrub | "
           "LEFT/RIGHT arrows step | R/Home restart | End = last frame")
-    plotter.show()
+
+    # NOTE: pyvista/VTK's add_timer_event() is unreliable for driving
+    # animation - it's a long-open, unfixed upstream bug (the callback often
+    # never fires at all: https://github.com/pyvista/pyvista/discussions/7654,
+    # https://github.com/pyvista/pyvista/issues/6985), reproducible even with
+    # pyvista's own official animation example. Driving the loop from Python
+    # with interactive_update=True + Plotter.update() instead - not the
+    # VTK-internal timer - is what actually works reliably.
+    plotter.show(interactive_update=True, auto_close=False)
+    while not plotter._closed:
+        tick()
+        plotter.update(stime=15, force_redraw=True)
     return plotter
