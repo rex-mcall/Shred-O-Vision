@@ -135,6 +135,46 @@ def rocket_primitive(n=24, body=2.0, nose=1.0, r=0.35, fin_count=4,
     return V, np.array(tris, int), np.array(parts, dtype=object)
 
 
+def detect_nose_axis(V):
+    """Guess which local axis a model's nose points along, as a '+z'-style
+    string for nose_vec().
+
+    Every renderer here assumes the model's long axis is its roll axis, and
+    misjudging it is visually catastrophic rather than subtle: the mesh gets
+    rotated about the wrong axis, so a rocket that the telemetry says is
+    flying straight up is drawn lying sideways, or - looking straight down
+    the tube - as nothing but fins radiating around an almost invisible
+    body. Different CAD tools and exporters disagree about which axis is
+    "up", so assuming +z silently breaks any model that doesn't share that
+    convention.
+
+    Axis = the longest bounding-box dimension (a rocket is far longer than
+    it is wide). Direction = whichever end is thinner, since the nose
+    tapers and the fin/motor end flares.
+    """
+    V = np.asarray(V, float)
+    span = V.max(0) - V.min(0)
+    axis = int(np.argmax(span))
+    if span[axis] <= 0:
+        return "+z"
+
+    lateral = [i for i in range(3) if i != axis]
+    a = V[:, axis]
+    lo, hi = a.min(), a.max()
+    end = 0.15 * (hi - lo)
+
+    def mean_radius(mask):
+        if not mask.any():
+            return 0.0
+        pts = V[mask][:, lateral]
+        return float(np.linalg.norm(pts - pts.mean(0), axis=1).mean())
+
+    r_lo = mean_radius(a <= lo + end)
+    r_hi = mean_radius(a >= hi - end)
+    sign = "+" if r_hi <= r_lo else "-"
+    return f"{sign}{'xyz'[axis]}"
+
+
 MARKER_COLOR = GLYPH_COLORS["fin_marked"]
 
 

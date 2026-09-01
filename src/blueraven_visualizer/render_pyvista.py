@@ -21,13 +21,14 @@ import numpy as np
 from .dialogs import ASK, resolve_files
 from .io import load_blueraven
 from .quaternion import quat_rotmat, align_rotation, nose_vec, pose_rotation
-from .mesh import rocket_primitive, glyph_face_colors
+from .mesh import rocket_primitive, glyph_face_colors, detect_nose_axis
 from .events import nearest, detect_peak_accel
 from .report import build_report
 
 try:
     import pyvista as pv
     import vtk
+    from vtk.util.numpy_support import vtk_to_numpy
 except ImportError as exc:  # pragma: no cover - exercised only when extra is missing
     raise ImportError(
         "The pyvista renderer needs the optional 'pyvista' extra: "
@@ -111,6 +112,21 @@ def _sanitize_obj_and_mtl(obj_path, mtl_path):
     return tmp_obj, tmp_mtl
 
 
+def _actor_points(actor):
+    """Vertices of a VTK actor as an (N, 3) array, or None.
+
+    vtkOBJImporter hands back raw VTK actors, not pyvista-wrapped ones, so
+    the convenient `.mapper.dataset.points` accessor doesn't exist here -
+    go through the VTK API instead.
+    """
+    mapper = actor.GetMapper() if hasattr(actor, "GetMapper") else None
+    dataset = mapper.GetInput() if mapper is not None else None
+    points = dataset.GetPoints() if dataset is not None else None
+    if points is None or points.GetNumberOfPoints() == 0:
+        return None
+    return vtk_to_numpy(points.GetData())
+
+
 def _load_textured_actors(plotter, obj_path):
     """Import obj+mtl+textures via VTK's own OBJ importer."""
     obj_dir = os.path.dirname(os.path.abspath(obj_path))
@@ -140,7 +156,7 @@ def _load_textured_actors(plotter, obj_path):
 
 
 def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
-              model_nose="+z", upright_start=True, highlight_peak=False,
+              model_nose="auto", upright_start=True, highlight_peak=False,
               fps=30, speed=1.0, record=None, off_screen=None):
 
     hr_csv, _, obj = resolve_files(hr_csv, None, obj)
@@ -178,6 +194,8 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     if not textured:
         V, F, parts = rocket_primitive()
         V = V - V.mean(0)
+        if model_nose == "auto":
+            model_nose = detect_nose_axis(V)
         V = (align_rotation(nose_vec(model_nose), [1, 0, 0]) @ V.T).T
         faces = np.hstack([np.full((len(F), 1), 3), F]).astype(np.int64)
         poly = pv.PolyData(V, faces)
@@ -204,6 +222,13 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         # Blue Raven quaternion convention) rotates the model around the
         # wrong axis entirely: it visibly tumbles ~90 deg off from where the
         # reported tilt/orientation actually is.
+        if model_nose == "auto":
+            # Detect from the imported geometry itself rather than assuming a
+            # convention - exporters disagree about which axis is "up".
+            pts = [p for p in (_actor_points(a) for a in actors) if p is not None]
+            model_nose = detect_nose_axis(np.vstack(pts)) if pts else "+z"
+            print(f"Model's long axis detected as {model_nose} "
+                  f"(override with --model-nose if the rocket looks mis-oriented).")
         model_align = align_rotation(nose_vec(model_nose), [1, 0, 0])
 
     v0 = quat_rotmat(Q[nearest(t_hr, win[0])]) @ np.array([1.0, 0, 0])

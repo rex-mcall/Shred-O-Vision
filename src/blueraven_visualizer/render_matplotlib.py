@@ -25,7 +25,7 @@ from .io import load_blueraven
 from .quaternion import quat_rotmat, align_rotation, nose_vec
 from .mesh import (
     load_obj, rocket_primitive, decimate_mesh, glyph_face_colors, shade_triangles,
-    angular_roll_marker, solid_color_with_marker,
+    angular_roll_marker, solid_color_with_marker, detect_nose_axis,
 )
 from .events import first_true_time, nearest, detect_peak_accel
 from .report import build_report
@@ -35,7 +35,7 @@ HIGHLIGHT_COLOR = (0.85, 0.06, 0.10)
 
 
 def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
-              model_nose="+z", upright_start=True, highlight_peak=False,
+              model_nose="auto", upright_start=True, highlight_peak=False,
               fps=30, speed=1.0, record=None, decim_plot=5,
               show_3d=True, max_faces="auto", dpi=100, blit=True):
 
@@ -114,6 +114,11 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     # object's actual visual center and inflates Rmax below - wasting frame
     # space around a model that then looks tiny/needle-thin.
     V = V - (V.min(0) + V.max(0)) / 2
+    if model_nose == "auto":
+        model_nose = detect_nose_axis(V)
+        if obj:
+            print(f"Model's long axis detected as {model_nose} "
+                  f"(override with --model-nose if the rocket looks mis-oriented).")
     V = (align_rotation(nose_vec(model_nose), [1, 0, 0]) @ V.T).T   # nose -> +X
     Rmax = float(np.linalg.norm(V, axis=1).max())
 
@@ -425,6 +430,13 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         fig.canvas.mpl_connect("resize_event", lambda evt: capture_blit_background())
         fig.canvas.mpl_connect("button_release_event", recapture_if_camera_moved)
         capture_blit_background()
+        # capture_blit_background() hides the animated artists, does a full
+        # draw to snapshot the static background, then unhides them - but
+        # that full draw is what's left on screen, so without painting them
+        # back the window opens with an EMPTY 3D panel (no rocket, no
+        # cursors) until the user happens to touch a control. Blit them on
+        # once here so the very first frame is visible.
+        fast_redraw()
 
     def sync_slider(i):
         sld.eventson = False

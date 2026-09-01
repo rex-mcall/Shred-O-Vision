@@ -6,6 +6,7 @@ import pytest
 from blueraven_visualizer.mesh import (
     load_obj, rocket_primitive, decimate_mesh, glyph_face_colors, GLYPH_COLORS,
     shade_triangles, angular_roll_marker, solid_color_with_marker, MARKER_COLOR,
+    detect_nose_axis,
 )
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -226,3 +227,39 @@ def test_decimate_mesh_lands_close_to_the_requested_face_count():
         assert len(Fd) >= 0.5 * target, (
             f"asked for {target} faces, got {len(Fd)} - decimation is overshooting"
         )
+
+
+# --- nose-axis detection: exporters disagree about which axis is "up", and
+# guessing wrong renders the rocket sideways or end-on (fins only) ---
+
+def test_detect_nose_axis_finds_the_built_in_glyphs_axis():
+    V, _, _ = rocket_primitive()
+    assert detect_nose_axis(V) == "+z"
+
+
+@pytest.mark.parametrize("perm,expected", [
+    ((0, 1, 2), "+z"),
+    ((2, 0, 1), "+x"),
+    ((1, 2, 0), "+y"),
+])
+def test_detect_nose_axis_follows_the_geometry_not_a_convention(perm, expected):
+    """Regression guard: model_nose used to default to a hardcoded '+z'. A
+    model authored along any other axis was then rotated about the wrong
+    axis - drawn lying sideways, or seen straight down the tube as nothing
+    but fins radiating around an invisible body, while the HUD still
+    reported a near-zero tilt."""
+    V, _, _ = rocket_primitive()
+    assert detect_nose_axis(V[:, list(perm)]) == expected
+
+
+def test_detect_nose_axis_picks_the_tapered_end_as_the_nose():
+    """The fin/motor end flares, the nose tapers - so the sign matters, or
+    the rocket flies tail-first."""
+    V, _, _ = rocket_primitive()
+    assert detect_nose_axis(V) == "+z"
+    assert detect_nose_axis(V * np.array([1, 1, -1])) == "-z"
+
+
+def test_detect_nose_axis_survives_a_degenerate_flat_model():
+    flat = np.zeros((10, 3))
+    assert detect_nose_axis(flat) in ("+x", "+y", "+z")

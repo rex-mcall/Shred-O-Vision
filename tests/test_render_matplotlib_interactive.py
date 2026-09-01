@@ -166,3 +166,34 @@ def test_manual_camera_rotation_survives_a_subsequent_blit_update():
         )
     finally:
         plt.close(fig)
+
+
+def test_first_frame_is_painted_before_any_user_interaction():
+    """Regression guard: capture_blit_background() hides the animated
+    artists, does a full draw to snapshot the static background, then
+    unhides them - but that background draw is what's left on screen. Without
+    painting them back, the window opened with a completely EMPTY 3D panel
+    (no rocket at all) until the user happened to touch a control.
+
+    Compares the panel as-shown against the same panel with the mesh
+    explicitly hidden: if the rocket was never painted, the two are
+    identical."""
+    fig = visualize(HR_SAMPLE, LR_SAMPLE, obj=None, window=[-1.0, 1.0],
+                     fps=10, record=None)
+    try:
+        ax3d = fig.axes[0]
+        as_shown = np.array(fig.canvas.copy_from_bbox(ax3d.bbox))
+
+        mesh = ax3d.collections[0]
+        mesh.set_visible(False)
+        fig.canvas.draw()
+        without_mesh = np.array(fig.canvas.copy_from_bbox(ax3d.bbox))
+
+        assert as_shown.shape == without_mesh.shape
+        assert not np.array_equal(as_shown, without_mesh), (
+            "the 3D panel as first shown is pixel-identical to one rendered with "
+            "the rocket hidden - the mesh was never painted after the blit "
+            "background capture"
+        )
+    finally:
+        plt.close(fig)

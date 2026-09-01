@@ -50,7 +50,10 @@ def build_parser():
                           "failure, off by default since on a nominal flight the peak is "
                           "just max thrust")
     ap.add_argument("--pad", type=float, default=1.5)
-    ap.add_argument("--model-nose", default="+z")
+    ap.add_argument("--model-nose", default="auto",
+                     help="which axis the model's nose points along in its own file "
+                          "(+x/-x/+y/-y/+z/-z). Default 'auto' detects it from the "
+                          "geometry - only set this if the rocket looks mis-oriented.")
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--speed", type=float, default=1.0)
     ap.add_argument("--record", default=None, help="output .mp4/.gif (else interactive)")
