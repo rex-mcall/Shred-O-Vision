@@ -3,8 +3,9 @@ import re
 import time
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pytest
-from matplotlib.backend_bases import KeyEvent
+from matplotlib.backend_bases import KeyEvent, MouseEvent
 
 from blueraven_visualizer.render_matplotlib import visualize
 
@@ -119,6 +120,49 @@ def test_slider_does_not_trigger_its_own_competing_redraw():
         assert per_step_ms < 150, (
             f"{per_step_ms:.1f}ms/step - the slider's own competing redraw "
             f"regressed (see Slider.drawon in render_matplotlib.py)"
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_manual_camera_rotation_survives_a_subsequent_blit_update():
+    """Regression guard: Axes3D's own mouse-drag rotate/pan/zoom
+    (Axes3D._on_move) ends with its own independent, full canvas.draw_idle()
+    - it knows nothing about our blit setup. Without recapturing the
+    background afterward, the very next slider/step/play update calls
+    fast_redraw(), which restores the now-STALE cached background (from
+    before the rotation) and silently snaps the view back to wherever it
+    was - the rotation appears to just not "stick". Recapturing the blit
+    background on every button_release_event (covering the end of a
+    rotate/pan/zoom drag, alongside window resize) is what fixes it."""
+    fig = visualize(HR_SAMPLE, LR_SAMPLE, obj=None, window=[-1.0, 1.0],
+                     fps=10, record=None)
+    try:
+        ax3d = fig.axes[0]
+        canvas = fig.canvas
+
+        # Simulate what Axes3D._on_move does at the end of a rotate drag:
+        # change the view angle, then its own full redraw.
+        ax3d.view_init(elev=60, azim=170)
+        fig.canvas.draw()
+        img_rotated = np.array(fig.canvas.buffer_rgba())
+
+        # The button release that should end the drag gesture.
+        MouseEvent("button_release_event", canvas, 100, 100, button=1)._process()
+
+        # A normal fast_redraw()-driven update, like the user stepping to
+        # the next frame - should NOT undo the rotation.
+        KeyEvent("key_press_event", canvas, "right")._process()
+        img_after_step = np.array(fig.canvas.buffer_rgba())
+
+        diff = np.abs(img_rotated.astype(int) - img_after_step.astype(int))
+        changed_fraction = (diff.sum(axis=2) > 10).sum() / diff.shape[0] / diff.shape[1]
+        # A real snap-back changes ~11% of pixels (measured); a normal
+        # one-frame step (mesh pose + cursor) changes ~1%. Cut well between
+        # the two.
+        assert changed_fraction < 0.05, (
+            f"{changed_fraction:.1%} of pixels changed after stepping post-rotation - "
+            f"looks like the camera snapped back to its pre-rotation angle"
         )
     finally:
         plt.close(fig)

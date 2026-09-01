@@ -351,10 +351,37 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         else:
             fig.canvas.draw_idle()
 
+    def camera_state():
+        if not show_3d:
+            return None
+        return (ax3d.azim, ax3d.elev, ax3d.get_xlim3d(), ax3d.get_ylim3d(), ax3d.get_zlim3d())
+
     if use_blit:
         for a in anim_artists:
             a.set_animated(True)
+        # The 3D axes' own mouse-drag rotate/pan/zoom (Axes3D._on_move) ends
+        # with its own independent, full canvas.draw_idle() - it's not part
+        # of, and knows nothing about, our blit setup. That full redraw
+        # itself looks correct in the moment, but our cached background
+        # snapshot is now stale (captured at the old camera angle): the very
+        # next slider/play/step update would call fast_redraw(), which
+        # restores that stale background and silently snaps the view back
+        # to wherever it was before the user rotated it. Recapturing after
+        # every mouse-button release fixes that (it covers the end of a
+        # rotate/pan/zoom drag) - but a release also fires for every button/
+        # slider click, which never touch the camera, so gate the (costly)
+        # recapture on the camera actually having moved rather than paying
+        # for a full redraw on every click.
+        last_camera = {"state": camera_state()}
+
+        def recapture_if_camera_moved(_evt):
+            now = camera_state()
+            if now != last_camera["state"]:
+                last_camera["state"] = now
+                capture_blit_background()
+
         fig.canvas.mpl_connect("resize_event", lambda evt: capture_blit_background())
+        fig.canvas.mpl_connect("button_release_event", recapture_if_camera_moved)
         capture_blit_background()
 
     def sync_slider(i):
