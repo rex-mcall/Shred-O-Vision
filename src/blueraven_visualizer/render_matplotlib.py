@@ -23,7 +23,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from .dialogs import ASK, resolve_files
 from .io import load_blueraven
 from .quaternion import quat_rotmat, align_rotation, nose_vec
-from .mesh import load_obj, rocket_primitive, decimate_mesh, glyph_face_colors
+from .mesh import load_obj, rocket_primitive, decimate_mesh, glyph_face_colors, shade_triangles
 from .events import first_true_time, nearest, detect_shred
 from .report import build_report
 
@@ -34,7 +34,7 @@ SHRED_COLOR = (0.85, 0.06, 0.10)
 def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
               model_nose="+z", upright_start=True, shred_highlight=True,
               fps=30, speed=1.0, record=None, decim_plot=5,
-              show_3d=True, max_faces=1500, dpi=100, blit=True):
+              show_3d=True, max_faces=10000, dpi=100, blit=True):
 
     # ---- resolve files (pops dialogs for any left as ASK) ----
     hr_csv, lr_csv, obj = resolve_files(hr_csv, lr_csv, obj)
@@ -215,12 +215,26 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         if show_3d:
             ih = nearest(t_hr, tf)
             Vk = (Rworld @ quat_rotmat(Q[ih]) @ V.T).T
-            mesh.set_verts(Vk[F])
+            tri = Vk[F]
+            mesh.set_verts(tri)
             post = (not np.isnan(tShred)) and tf >= tShred
             if parts is not None:
-                mesh.set_facecolor(face_colors_shred if (post and shred_highlight) else face_colors_normal)
+                base = face_colors_shred if (post and shred_highlight) else face_colors_normal
             else:
-                mesh.set_facecolor(SHRED_COLOR if (post and shred_highlight) else BASE_COLOR)
+                base = SHRED_COLOR if (post and shred_highlight) else BASE_COLOR
+            mesh.set_facecolor(shade_triangles(base, tri))
+            # Blitting (see use_blit below) draws animated artists via
+            # ax.draw_artist(), which - unlike a full fig.canvas.draw() -
+            # does NOT trigger Axes3D's normal per-child do_3d_projection()
+            # pass. Without calling it here explicitly, set_verts() above
+            # would have no visible effect under blitting: the mesh would
+            # render frozen at its last fully-drawn orientation forever.
+            # Guarded on ax3d.M: that's the 3D projection matrix Axes3D
+            # itself computes during its own first full draw - this draw()
+            # function runs once (for the initial pose) before any full
+            # draw has happened yet, when it's still None.
+            if ax3d.M is not None:
+                mesh.do_3d_projection()
             tilt_now = np.degrees(np.arccos(
                 np.clip(np.dot(quat_rotmat(Q[ih]) @ [1, 0, 0], v0), -1, 1)))
             hud.set_text(f"T+{tf:5.2f} s\ntilt {tilt_now:3.0f} deg\n"
@@ -272,6 +286,13 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     pax = fig.add_axes([0.33, 0.065, 0.12, 0.035])
     nax = fig.add_axes([0.46, 0.065, 0.09, 0.035])
     sld = Slider(sax, "t (s)", win[0], win[1], valinit=win[0])
+    # Slider.set_val() unconditionally triggers its own canvas.draw_idle()
+    # (gated on `drawon`, not on `eventson` - setting eventson=False during
+    # sync_slider() below only suppresses the on_changed callback, not this)
+    # - a second, competing full redraw on every single frame update,
+    # independent of and undoing the point of fast_redraw()'s blitting.
+    # This widget's own artists are in anim_artists and get blitted there.
+    sld.drawon = False
     btn_restart = Button(rax, "|<< Restart")
     btn_prev = Button(lax, "Step <")
     btn_play = Button(pax, "Play")
@@ -279,9 +300,62 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
 
     n_frames = len(frame_times)
     state = {"playing": False, "anim": None, "i": 0}
-    anim_artists = ([mesh, hud] if show_3d else []) + cursors
-    # blitting on a 3D axis can fail to reproject the mesh; only blit in 2D-only mode
-    use_blit = blit and not show_3d
+    # Everything that needs to visually update every frame: the 3D mesh +
+    # HUD text, the telemetry cursor lines, AND the slider's own bar/handle/
+    # value-label. That last part matters: Slider.set_val() schedules its
+    # own redraw via a DEFERRED canvas.draw_idle() call, entirely decoupled
+    # from whatever draws the rest of the figure - during fast playback
+    # those deferred redraws get coalesced by the GUI event loop and lag
+    # behind everything else, which is exactly "the slider doesn't animate
+    # with the rest of the program". Blitting the slider's own artists
+    # ourselves, in the same immediate pass as the mesh/cursors, keeps it
+    # in lockstep instead of relying on that separate deferred redraw.
+    # btn_play.label is here too: its "Play"/"Pause" text changes on every
+    # toggle, and with nothing else prompting a redraw of it, a blitted pass
+    # that skipped it would leave the stale label visible indefinitely (the
+    # cached background has the old text baked in).
+    anim_artists = (([mesh, hud] if show_3d else []) + cursors
+                    + [sld.poly, sld._handle, sld.valtext, btn_play.label])
+
+    # A full (non-blit) redraw of this figure - 3D pane + 4 telemetry axes,
+    # each with their own ticks/labels - is drastically slower than the
+    # actual content change per frame would suggest (matplotlib recomputes
+    # axis chrome, tick positions, and font metrics from scratch on every
+    # full draw): ~1000ms/frame measured, regardless of mesh complexity,
+    # vs <1ms/frame once blitting only redraws what actually changed. See
+    # draw()'s explicit do_3d_projection() call above for why blitting is
+    # safe here even with the 3D mesh. FuncAnimation has its own built-in
+    # blit support, but it only covers its own timer-driven ticks - manual
+    # interactions (drag the slider, click Step/Restart) go through a
+    # separate code path, so blitting is managed by hand here and used
+    # consistently for every kind of update, not just Play.
+    use_blit = blit
+    blit_bg = {"data": None}
+
+    def capture_blit_background():
+        if not use_blit:
+            return
+        for a in anim_artists:
+            a.set_visible(False)
+        fig.canvas.draw()
+        blit_bg["data"] = fig.canvas.copy_from_bbox(fig.bbox)
+        for a in anim_artists:
+            a.set_visible(True)
+
+    def fast_redraw():
+        if use_blit and blit_bg["data"] is not None:
+            fig.canvas.restore_region(blit_bg["data"])
+            for a in anim_artists:
+                a.axes.draw_artist(a)
+            fig.canvas.blit(fig.bbox)
+        else:
+            fig.canvas.draw_idle()
+
+    if use_blit:
+        for a in anim_artists:
+            a.set_animated(True)
+        fig.canvas.mpl_connect("resize_event", lambda evt: capture_blit_background())
+        capture_blit_background()
 
     def sync_slider(i):
         sld.eventson = False
@@ -293,12 +367,12 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         state["i"] = i
         draw(frame_times[i])
         sync_slider(i)
-        fig.canvas.draw_idle()
+        fast_redraw()
 
     def on_slider(val):
         state["i"] = nearest(frame_times, val)
         draw(val)
-        fig.canvas.draw_idle()
+        fast_redraw()
     sld.on_changed(on_slider)
 
     def step(_):
@@ -311,14 +385,14 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         if target_t >= win[1]:
             stop()
             goto(n_frames - 1)
-            return anim_artists
+            return
         i = nearest(frame_times, target_t)
         if i == state["i"]:
-            return anim_artists   # nothing new to draw yet
+            return   # nothing new to draw yet
         state["i"] = i
-        artists = draw(frame_times[i])
+        draw(frame_times[i])
         sync_slider(i)
-        return artists
+        fast_redraw()
 
     def stop():
         if state["anim"] is not None:
@@ -327,12 +401,9 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             except Exception:
                 pass
             state["anim"] = None
-        if use_blit:
-            for a in anim_artists:
-                a.set_animated(False)
         state["playing"] = False
         btn_play.label.set_text("Play")
-        fig.canvas.draw_idle()
+        fast_redraw()
 
     def play():
         from matplotlib.animation import FuncAnimation
@@ -344,16 +415,16 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         btn_play.label.set_text("Pause")
         state["wall_t0"] = time.perf_counter()
         state["data_t0"] = frame_times[state["i"]]
-        if use_blit:
-            for a in anim_artists:
-                a.set_animated(True)
-        # Poll faster than `fps` - the wall-clock pacing in step() is what
-        # keeps playback speed correct; polling more often just means less
-        # slack between an actual redraw and the moment it was due.
-        interval_ms = min(1000.0 / max(fps, 1), 20.0)
+        # Poll at the intended frame rate, not faster: step() already only
+        # does real work when the wall clock has actually advanced past the
+        # next frame, so polling faster than fps buys nothing but wasted
+        # ticks. blit=False here - the FuncAnimation timer only drives
+        # *when* step() runs; fast_redraw() (called from inside step())
+        # handles the actual blitting.
+        interval_ms = 1000.0 / max(fps, 1)
         state["anim"] = FuncAnimation(fig, step, interval=interval_ms,
-                                      blit=use_blit, cache_frame_data=False)
-        fig.canvas.draw_idle()
+                                      blit=False, cache_frame_data=False)
+        fast_redraw()
 
     def toggle_play(_=None):
         stop() if state["playing"] else play()

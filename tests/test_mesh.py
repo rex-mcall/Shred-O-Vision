@@ -5,6 +5,7 @@ import pytest
 
 from blueraven_visualizer.mesh import (
     load_obj, rocket_primitive, decimate_mesh, glyph_face_colors, GLYPH_COLORS,
+    shade_triangles,
 )
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -75,3 +76,45 @@ def test_glyph_face_colors_highlight_preserves_roll_marker():
             assert tuple(colors[i]) == pytest.approx(marker)
         else:
             assert tuple(colors[i]) == pytest.approx(shred_red)
+
+
+def test_shade_triangles_varies_brightness_by_orientation():
+    """Regression guard: matplotlib's Poly3DCollection defaults to
+    shade=False (flat, unlit color) - a real mesh rendered that way reads as
+    a featureless silhouette with no visible depth or edges, however
+    detailed the geometry, which is what made a real textured rocket model
+    look like a plain rod instead of a rocket with fins."""
+    # two triangles facing opposite directions (+Z normal vs -Z normal)
+    tri = np.array([
+        [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        [[0, 0, 0], [0, 1, 0], [1, 0, 0]],
+    ], dtype=float)
+    colors = shade_triangles((0.5, 0.5, 0.5), tri, light_dir=(0, 0, 1))
+    assert not np.allclose(colors[0], colors[1])
+
+
+def test_shade_triangles_respects_ambient_floor():
+    # a triangle facing directly away from the light shouldn't go fully black
+    tri = np.array([[[0, 0, 0], [0, 1, 0], [1, 0, 0]]], dtype=float)   # normal ~ -Z
+    colors = shade_triangles((1.0, 1.0, 1.0), tri, light_dir=(0, 0, 1), ambient=0.3)
+    assert colors[0].min() >= 0.3 - 1e-8
+
+
+def test_shade_triangles_preserves_per_face_base_colors():
+    tri = np.array([
+        [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+    ], dtype=float)
+    base = np.array([[1.0, 0, 0], [0, 0, 1.0]])
+    colors = shade_triangles(base, tri, light_dir=(0, 0, 1))
+    # same geometry/light -> same brightness -> colors stay proportional to
+    # (and distinguishable by) their own base hue, not averaged together
+    assert colors[0][0] > colors[0][2]   # first face stays red-dominant
+    assert colors[1][2] > colors[1][0]   # second face stays blue-dominant
+
+
+def test_shade_triangles_output_clipped_to_valid_color_range():
+    tri = np.array([[[0, 0, 0], [1, 0, 0], [0, 1, 0]]], dtype=float)
+    colors = shade_triangles((1.0, 1.0, 1.0), tri, light_dir=(0, 0, 1), ambient=1.5)
+    assert colors.min() >= 0
+    assert colors.max() <= 1

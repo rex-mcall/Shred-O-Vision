@@ -48,7 +48,7 @@ def build_parser():
     ap.add_argument("--record", default=None, help="output .mp4/.gif (else interactive)")
     ap.add_argument("--no-3d", action="store_true",
                      help="[matplotlib only] telemetry only (scrubs instantly)")
-    ap.add_argument("--max-faces", type=int, default=1500,
+    ap.add_argument("--max-faces", type=int, default=10000,
                     help="[matplotlib only] decimate the model to this many faces (-1 = no limit)")
     ap.add_argument("--dpi", type=int, default=100, help="[matplotlib only] figure DPI (lower = faster)")
     ap.add_argument("--no-blit", action="store_true",

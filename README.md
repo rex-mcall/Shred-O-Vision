@@ -10,17 +10,17 @@ Built for post-flight forensics: pinpoint exactly when and how a rocket lost sta
 ## What it does
 
 - Reads a matched pair of Blue Raven CSV exports: the 500 Hz **HR** file (quaternions, accel, gyro) and the 50 Hz **LR** file (baro altitude/velocity, pyro voltages, tilt/roll, flight-state flags). The LR file is optional — without it you still get the 3D orientation view plus HR-derived acceleration/gyro panels.
-- Spins a 3D model (your own `.obj`, or a built-in rocket glyph with fins, a colored nose, and one fin + a matching body stripe painted a marker color so roll/spin is visible during playback) using the logged quaternions, with a moving time cursor synced across every panel.
+- Spins a 3D model (your own `.obj`, or a built-in rocket glyph with fins, a colored nose, and one fin + a matching body stripe painted a marker color so roll/spin is visible during playback) using the logged quaternions, with a moving time cursor synced across every panel. The matplotlib backend real-time-shades every face from its own current normal (not matplotlib's `shade=True`, which freezes lighting at the model's starting orientation and never updates it as the mesh rotates) - real geometric detail like fins reads clearly even in flat gray, not just with pyvista's textures.
 - Auto-detects liftoff, burnout, apogee, drogue/main-charge fire, the shred instant (peak IMU acceleration), and tumble onset (peak angular rate), and marks them on every plot.
 - Prints a console flight report summarizing every detected event plus max velocity/Mach and peak altitude - data only, no interpretation.
-- Interactive playback (Play/Pause, Step◀/▶, Restart, drag-to-scrub, keyboard shortcuts) is paced to the wall clock, so it tracks real time (at `--speed 1`, the default) even if a frame takes longer to render than its nominal slot - it catches up rather than falling into slow motion. Exports a real-time-accurate MP4/GIF for sharing.
+- Interactive playback (Play/Pause, Step◀/▶, Restart, drag-to-scrub, keyboard shortcuts) is paced to the wall clock, so it tracks real time (at `--speed 1`, the default) even if a frame takes longer to render than its nominal slot - it catches up rather than falling into slow motion. The matplotlib backend blits (redraws only what changed - the mesh, cursors, and the slider itself - instead of the whole figure, ticks and all, every frame), the difference between roughly 1000ms and 15ms per interaction. Exports a real-time-accurate MP4/GIF for sharing.
 - Two rendering backends — pick whichever fits what you need:
 
   | | `--renderer matplotlib` (default) | `--renderer pyvista` |
   |---|---|---|
   | Dependencies | numpy/pandas/matplotlib only | + [PyVista](https://pyvista.org)/VTK (`pip install blueraven-visualizer[pyvista]`) |
   | Telemetry dashboard | Yes, full 4-panel layout | No — 3D orientation view only |
-  | OBJ textures/materials | No (flat-shaded silhouette) | Yes, real per-part textures via VTK's OBJ importer |
+  | OBJ textures/materials | No (real-time-lit gray, not textured) | Yes, real per-part textures via VTK's OBJ importer |
   | Rendering | Software (matplotlib `mplot3d`) | Hardware-accelerated |
   | Camera | Interactive (mouse-orbit) | Fixed and locked - a ground plane + a launch-vertical reference line stay put while the rocket tumbles, so it's easy to tell what's actually moving |
 
@@ -115,7 +115,7 @@ Every run also prints a flight report to the console:
 ----------------------------------------------------------
 ```
 
-> **A note on OBJ models:** because the rocket tumbles freely, the matplotlib backend's 3D view has to fit your whole model at any rotation without distorting it - so a very slender model (long body, small diameter), or one exported as an "exploded" CAD diagram with gaps between parts, will look thin no matter how the camera is tuned. The pyvista backend doesn't have this limitation (its camera fits the model once rather than guaranteeing every rotation stays in frame), so it's the better choice for a detailed or slender model - an assembled, non-exploded model looks best either way.
+> **A note on OBJ models:** because the rocket tumbles freely, the matplotlib backend's 3D view has to fit your whole model at any rotation without distorting it - so a very slender model (long body, small diameter), or one exported as an "exploded" CAD diagram with gaps between parts, will still show some empty margin no matter how the camera is tuned. That's a framing limit, not a detail one, though - real per-face shading and a much higher default mesh-decimation budget mean the model's actual shape (fins, seams, taper) reads clearly either way. The pyvista backend doesn't have the framing limit at all (its camera fits the model once rather than guaranteeing every rotation stays in frame) and adds real textures on top, so it's still the better choice for a highly detailed or very slender model - an assembled, non-exploded model looks best in either backend.
 
 ## CSV format
 

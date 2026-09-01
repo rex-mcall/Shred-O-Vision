@@ -114,6 +114,39 @@ def glyph_face_colors(parts, highlight=None):
     return np.array(out, dtype=float)
 
 
+def shade_triangles(base_colors, tri_verts, light_dir=(0.35, -0.35, 0.87), ambient=0.35):
+    """Simple per-face diffuse shading from each triangle's own normal.
+
+    matplotlib's Poly3DCollection has a `shade=True` option, but it computes
+    normals once at construction and never updates them - so as the mesh
+    rotates during animation the "lit" side stays fixed to the object's
+    *initial* pose instead of following the current one, and without any
+    shading at all a mesh rendered in one flat color reads as a silhouette
+    with no visible depth or edges, however detailed the underlying geometry
+    actually is. This recomputes real per-face brightness from whatever
+    (possibly already-rotated) triangle vertices are passed in, every call.
+
+    base_colors: single RGB, or one RGB per face (len(tri_verts), 3).
+    tri_verts: (n_faces, 3, 3) triangle vertex positions.
+    Returns an (n_faces, 3) RGB array, clipped to [0, 1].
+    """
+    tri_verts = np.asarray(tri_verts, float)
+    e1 = tri_verts[:, 1] - tri_verts[:, 0]
+    e2 = tri_verts[:, 2] - tri_verts[:, 0]
+    normals = np.cross(e1, e2)
+    norm = np.linalg.norm(normals, axis=1, keepdims=True)
+    normals = normals / np.where(norm == 0, 1, norm)
+
+    light = np.asarray(light_dir, float)
+    light = light / np.linalg.norm(light)
+    brightness = np.clip(normals @ light, 0, 1) * (1 - ambient) + ambient
+
+    base = np.asarray(base_colors, float)
+    if base.ndim == 1:
+        base = np.tile(base, (len(tri_verts), 1))
+    return np.clip(base * brightness[:, None], 0, 1)
+
+
 def decimate_mesh(V, F, target_faces):
     """Vertex-clustering decimation: snaps vertices to a grid and rebuilds faces.
     Fast, dependency-free, and good enough for an attitude silhouette. matplotlib's
