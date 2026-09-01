@@ -13,6 +13,8 @@ with wall-clock-paced play/pause (SPACE), step (arrow keys), and scrub
 
 import math
 import os
+import re
+import tempfile
 import time
 import numpy as np
 
@@ -50,6 +52,65 @@ def _rotation_transform(R, center):
     return t
 
 
+_CLAMP_OPTION = re.compile(r"-clamp\s+(on|off)\s*")
+
+
+def _sanitize_obj_and_mtl(obj_path, mtl_path):
+    """Write temp copies of obj+mtl that work around two confirmed
+    vtkOBJImporter limitations, both hit in practice with real-world
+    OpenRocket/CAD OBJ exports (not just a hypothetical edge case - this is
+    what happens with an unmodified, real designer's export):
+
+      - it mis-parses a map_Kd/map_Ka/etc.'s `-clamp on|off` option,
+        corrupting the texture filename that follows it, so textures fail
+        to load ("Could not open file ...-clamp off .../some_texture.png")
+      - it fails to match usemtl/newmtl names against each other when
+        they're long and/or contain punctuation like the parts list a CAD
+        tool tends to name materials after (verified: renaming every
+        material to a short mat_N id fixes this every time, with no
+        visible difference since VTK only uses the name to link usemtl to
+        newmtl, never displays it)
+
+    Never touches the original files. Returns (obj_path, mtl_path) for the
+    sanitized temp copies.
+    """
+    with open(mtl_path, "r", encoding="utf-8", errors="ignore") as fh:
+        mtl_text = fh.read()
+
+    name_map = {}
+    counter = [0]
+
+    def short_name(original):
+        if original not in name_map:
+            counter[0] += 1
+            name_map[original] = f"mat_{counter[0]}"
+        return name_map[original]
+
+    def rename_mtl(m):
+        original = m.group(1).strip()
+        return f"# {original}\nnewmtl {short_name(original)}"
+
+    mtl_text = re.sub(r"^newmtl[ \t]+(.+)$", rename_mtl, mtl_text, flags=re.MULTILINE)
+    mtl_text = _CLAMP_OPTION.sub("", mtl_text)
+
+    with open(obj_path, "r", encoding="utf-8", errors="ignore") as fh:
+        obj_text = fh.read()
+
+    obj_text = re.sub(r"^usemtl[ \t]+(.+)$",
+                      lambda m: f"usemtl {short_name(m.group(1).strip())}",
+                      obj_text, flags=re.MULTILINE)
+    obj_text = re.sub(r"^mtllib[ \t]+.+$", "mtllib model.mtl", obj_text, flags=re.MULTILINE)
+
+    tmp_dir = tempfile.mkdtemp(prefix="blueraven_obj_")
+    tmp_obj = os.path.join(tmp_dir, "model.obj")
+    tmp_mtl = os.path.join(tmp_dir, "model.mtl")
+    with open(tmp_obj, "w", encoding="utf-8") as fh:
+        fh.write(obj_text)
+    with open(tmp_mtl, "w", encoding="utf-8") as fh:
+        fh.write(mtl_text)
+    return tmp_obj, tmp_mtl
+
+
 def _load_textured_actors(plotter, obj_path):
     """Import obj+mtl+textures via VTK's own OBJ importer."""
     obj_dir = os.path.dirname(os.path.abspath(obj_path))
@@ -61,10 +122,17 @@ def _load_textured_actors(plotter, obj_path):
                 mtl_path = os.path.join(obj_dir, mtl_name)
                 break
 
-    importer = vtk.vtkOBJImporter()
-    importer.SetFileName(obj_path)
+    import_obj, import_mtl = obj_path, mtl_path
     if mtl_path and os.path.exists(mtl_path):
-        importer.SetFileNameMTL(mtl_path)
+        import_obj, import_mtl = _sanitize_obj_and_mtl(obj_path, mtl_path)
+
+    importer = vtk.vtkOBJImporter()
+    importer.SetFileName(import_obj)
+    if import_mtl and os.path.exists(import_mtl):
+        importer.SetFileNameMTL(import_mtl)
+    # Textures live alongside the ORIGINAL obj, not the sanitized temp copy -
+    # only the material-name/`-clamp` text was rewritten, texture filenames
+    # (as relative paths from here) are untouched.
     importer.SetTexturePath(obj_dir)
     importer.SetRenderWindow(plotter.ren_win)
     importer.Update()
@@ -203,6 +271,16 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     if record:
         frame_times = np.arange(win[0], win[1], speed / fps)
         ext = os.path.splitext(record)[1].lower()
+        if ext not in (".mp4", ".gif"):
+            # Without a recognized extension, imageio can't tell what format
+            # to write and fails deep inside write_frame() with a bare
+            # `KeyError: None` - not helpful. This also protects against
+            # ext == "" specifically, which open_movie() would otherwise
+            # silently accept and only fail on the first actual frame write.
+            raise ValueError(
+                f"Can't tell what format to save as: {record!r} needs to end in "
+                f".mp4 or .gif."
+            )
         if ext == ".gif":
             plotter.open_gif(record, fps=fps)
         else:

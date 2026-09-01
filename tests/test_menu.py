@@ -78,6 +78,36 @@ def test_menu_prompts_for_all_three_files_unconditionally(monkeypatch):
     assert any("OBJ" in t for t in seen_titles)
 
 
+def test_menu_export_filename_gets_the_right_extension_even_without_one(monkeypatch):
+    """Regression guard: typing a custom filename without an extension (an
+    easy mistake - the prompt shows a default *with* one, but nothing stops
+    you typing over it with a bare name) used to reach the renderer and
+    crash deep inside a third-party library with a bare `KeyError: None`."""
+    def fake_pick_file(title, *a, **k):
+        return "/fake/hr.csv" if "HIGH-RATE" in title else None
+
+    inputs = iter(["", "", "2", "1", "my_shred_clip"])   # export, mp4, no extension typed
+    monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
+    monkeypatch.setattr(menu, "pick_file", fake_pick_file)
+
+    choices = menu.run_menu()
+
+    assert choices["record"] == "my_shred_clip.mp4"
+
+
+def test_menu_export_filename_wrong_extension_gets_corrected(monkeypatch):
+    def fake_pick_file(title, *a, **k):
+        return "/fake/hr.csv" if "HIGH-RATE" in title else None
+
+    inputs = iter(["", "", "2", "2", "clip.mp4"])   # export, GIF chosen, but typed .mp4
+    monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
+    monkeypatch.setattr(menu, "pick_file", fake_pick_file)
+
+    choices = menu.run_menu()
+
+    assert choices["record"] == "clip.gif"
+
+
 def test_menu_exits_cleanly_if_no_hr_file_selected(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a: "")
     monkeypatch.setattr(menu, "pick_file", lambda *a, **k: None)

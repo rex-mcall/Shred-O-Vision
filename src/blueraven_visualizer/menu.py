@@ -8,6 +8,7 @@ else.
 """
 
 import importlib.util
+import os
 
 from .dialogs import pick_file
 
@@ -90,6 +91,13 @@ def run_menu():
                                               ("GIF (bigger file, no player needed)", "gif")])
         ext = fmt
         record = _text("Output filename", f"blueraven_clip.{ext}")
+        # Someone typing a custom name naturally won't always think to
+        # include the extension - but without one, the exporter can't tell
+        # what format to write and fails deep inside a third-party library
+        # with a bare "KeyError: None" instead of anything actionable. Force
+        # it to match what was actually chosen above.
+        if not record.lower().endswith(f".{ext}"):
+            record = os.path.splitext(record)[0] + f".{ext}"
 
     renderer_label = "Realistic 3D (textured)" if renderer == "pyvista" else "Standard (with charts)"
 

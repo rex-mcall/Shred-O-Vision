@@ -116,6 +116,8 @@ Every run also prints a flight report to the console:
 ```
 
 > **A note on OBJ models:** because the rocket tumbles freely, the matplotlib backend's 3D view has to fit your whole model at any rotation without distorting it - so a very slender model (long body, small diameter), or one exported as an "exploded" CAD diagram with gaps between parts, will still show some empty margin no matter how the camera is tuned. That's a framing limit, not a detail one, though - real per-face shading and a much higher default mesh-decimation budget mean the model's actual shape (fins, seams, taper) reads clearly either way. The pyvista backend doesn't have the framing limit at all (its camera fits the model once rather than guaranteeing every rotation stays in frame) and adds real textures on top, so it's still the better choice for a highly detailed or very slender model - an assembled, non-exploded model looks best in either backend.
+>
+> The pyvista backend also automatically works around two real, confirmed limitations in VTK's own OBJ importer that show up with unmodified real-world CAD/OpenRocket exports (a `-clamp on`/`off` texture option that corrupts the filename after it, and material names that are long or punctuated enough that VTK fails to match them between the `.obj` and `.mtl`) - it rewrites temporary sanitized copies before handing them to VTK and never touches your original files.
 
 ## CSV format
 

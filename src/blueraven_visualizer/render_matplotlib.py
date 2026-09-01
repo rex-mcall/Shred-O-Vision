@@ -253,6 +253,11 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         anim = FuncAnimation(fig, lambda i: draw(frame_times[i]),
                              frames=len(frame_times), interval=1000 / fps, blit=False)
         ext = os.path.splitext(record)[1].lower()
+        if ext not in (".mp4", ".gif"):
+            raise ValueError(
+                f"Can't tell what format to save as: {record!r} needs to end in "
+                f".mp4 or .gif."
+            )
         if ext == ".gif":
             anim.save(record, writer="pillow", fps=fps)
         else:

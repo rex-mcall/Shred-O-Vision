@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from blueraven_visualizer.render_matplotlib import visualize
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -19,6 +21,16 @@ def test_visualize_full_dashboard_gif(tmp_path):
     assert result == str(out)
     assert out.exists()
     assert out.stat().st_size > 0
+
+
+def test_record_without_a_recognized_extension_raises_a_clear_error(tmp_path):
+    """Same regression guard as the pyvista backend: a filename with no/
+    unrecognized extension should fail fast with a clear message instead of
+    an obscure error partway through matplotlib's animation writer."""
+    out = tmp_path / "no_extension"
+    with pytest.raises(ValueError, match=r"\.mp4 or \.gif"):
+        visualize(HR_SAMPLE, LR_SAMPLE, obj=None, window=[-1.0, 1.0],
+                  fps=8, record=str(out))
 
 
 def test_visualize_lr_optional(tmp_path):
