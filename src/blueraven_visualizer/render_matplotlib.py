@@ -239,12 +239,15 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     # event lines + moving cursor on every telemetry panel
     cursors = []
     for ax in tele:
-        for name, te in events.items():
+        for te in events.values():
             if np.isnan(te):
                 continue
-            ax.axvline(te, color=(HIGHLIGHT_COLOR if name == "peak g" else "0.6"),
-                       lw=(1.4 if name == "peak g" else 0.7),
-                       ls=("-" if name == "peak g" else ":"), alpha=0.8)
+            # One quiet marker style for every detected event. Peak-g used to
+            # get a bold red line across all four panels, which reads as an
+            # alarm on a nominal flight where that instant is just max thrust,
+            # and crowded the traces it was drawn over. The peak is still
+            # called out by value on the acceleration trace itself.
+            ax.axvline(te, color="0.6", lw=0.7, ls=":", alpha=0.8)
         cursors.append(ax.axvline(win[0], color="k", lw=1.0))
         ax.set_xlim(*win)
     for ax in tele[:-1]:
