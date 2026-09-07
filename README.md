@@ -4,7 +4,6 @@ Turns a [Featherweight Blue Raven](https://www.featherweightaltimeters.com/) fli
 
 Replay any flight from the rocket's own point of view - a clean nominal flight or a breakup. It reports the key instants (liftoff, burnout, apogee, deployments, peak acceleration and angular rate) and leaves the interpretation to you; for failure analysis, `--window peak --highlight-peak` zooms to the peak-g instant and marks everything after it.
 
-![CI](https://github.com/rex-mcall/Shred-O-Vision/actions/workflows/ci.yml/badge.svg)
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 ## What it does
@@ -147,6 +146,13 @@ Expects the raw, unmodified CSV exports from the Featherweight Blue Raven app: t
 ## Contributing / issues
 
 Bug reports and PRs welcome — this was built for one team's flight data, so if your Blue Raven export doesn't parse cleanly, please open an issue with (a redacted sample of) the CSV header.
+
+There's no CI on this repo; the test suite runs locally:
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
 
 ## License
 
