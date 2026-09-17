@@ -14,7 +14,6 @@ velocity, pyro-voltage, tilt/roll, or LR-flag event markers.
 """
 
 import os
-import time
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
@@ -30,6 +29,7 @@ from .mesh import (
 )
 from .events import first_true_time, nearest, detect_peak_accel
 from .report import build_report
+from .playback import export_video, run_interactive, validate_record_path
 
 BASE_COLOR = (0.78, 0.80, 0.90)
 HIGHLIGHT_COLOR = (0.85, 0.06, 0.10)
@@ -43,6 +43,8 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     # ---- resolve files (pops dialogs for any left as ASK) ----
     hr_csv, lr_csv, obj = resolve_files(hr_csv, lr_csv, obj)
     has_lr = lr_csv is not None
+    if record:
+        validate_record_path(record)
 
     if max_faces == "auto":
         # Interactive playback redraws many times a second, so a detailed
@@ -255,6 +257,9 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
 
     # ---- frame update ----
     frame_times = np.arange(win[0], win[1], speed / fps)
+    if len(frame_times) == 0:
+        raise ValueError(f"Playback window {win[0]:.2f}..{win[1]:.2f} s contains no frames "
+                         f"- check --window against the flight's recorded time range.")
 
     def draw(tf):
         artists = []
@@ -294,276 +299,8 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     draw(win[0])
 
     # ---- record or show ----
+    content_artists = ([mesh, hud] if show_3d else []) + cursors
     if record:
-        ext = os.path.splitext(record)[1].lower()
-        if ext not in (".mp4", ".gif"):
-            raise ValueError(
-                f"Can't tell what format to save as: {record!r} needs to end in "
-                f".mp4 or .gif."
-            )
-
-        # Render frames by BLITTING, not by a full canvas draw each time.
-        # Measured on this 5-axis figure: a full redraw costs ~280 ms/frame
-        # before the rocket is even considered - that's matplotlib rebuilding
-        # axis chrome, ticks and font metrics that never change between
-        # frames - while only the mesh, HUD and time cursors actually move.
-        # Reusing a cached background and redrawing just those cuts the
-        # fixed cost to a few ms and leaves only the mesh's own draw time.
-        animated = ([mesh, hud] if show_3d else []) + cursors
-        for a in animated:
-            a.set_animated(True)
-        fig.canvas.draw()
-        background = fig.canvas.copy_from_bbox(fig.bbox)
-
-        def render_frame(tf):
-            draw(tf)
-            fig.canvas.restore_region(background)
-            for a in animated:
-                a.axes.draw_artist(a)
-            fig.canvas.blit(fig.bbox)
-            return np.asarray(fig.canvas.buffer_rgba())
-
-        n_total = len(frame_times)
-        print(f"Rendering {n_total} frames to {record} ...")
-        show_progress = n_total >= 100
-        progress_step = max(1, n_total // 10)
-
-        def note_progress(i):
-            if show_progress and i and (i % progress_step == 0 or i == n_total - 1):
-                print(f"  {i + 1}/{n_total} frames ({(i + 1) / n_total:.0%})", flush=True)
-
-        if ext == ".gif":
-            from PIL import Image
-            frames = []
-            for i, tf in enumerate(frame_times):
-                frames.append(Image.fromarray(render_frame(tf).copy()).convert("P",
-                                                                               palette=Image.ADAPTIVE))
-                note_progress(i)
-            frames[0].save(record, save_all=True, append_images=frames[1:],
-                           duration=int(1000 / fps), loop=0)
-        else:
-            # imageio-ffmpeg ships its own ffmpeg binary (it's a core
-            # dependency), so MP4 export needs nothing installed system-wide.
-            import imageio_ffmpeg
-            h, w = fig.canvas.get_width_height()[::-1]
-            writer = imageio_ffmpeg.write_frames(
-                record, (w, h), fps=fps, pix_fmt_in="rgba", quality=7,
-                ffmpeg_log_level="error",
-            )
-            writer.send(None)
-            try:
-                for i, tf in enumerate(frame_times):
-                    writer.send(render_frame(tf).tobytes())
-                    note_progress(i)
-            finally:
-                writer.close()
-
-        plt.close(fig)
-        print(f"Saved {record}  ({n_total} frames, {n_total / fps:.1f}s)")
-        return record
-
-    # interactive: slider + play/pause/step/restart, with keyboard shortcuts
-    from matplotlib.widgets import Slider, Button
-    sax = fig.add_axes([0.08, 0.02, 0.84, 0.022])
-    rax = fig.add_axes([0.08, 0.065, 0.14, 0.035])
-    lax = fig.add_axes([0.23, 0.065, 0.09, 0.035])
-    pax = fig.add_axes([0.33, 0.065, 0.12, 0.035])
-    nax = fig.add_axes([0.46, 0.065, 0.09, 0.035])
-    sld = Slider(sax, "t (s)", win[0], win[1], valinit=win[0])
-    # Slider.set_val() unconditionally triggers its own canvas.draw_idle()
-    # (gated on `drawon`, not on `eventson` - setting eventson=False during
-    # sync_slider() below only suppresses the on_changed callback, not this)
-    # - a second, competing full redraw on every single frame update,
-    # independent of and undoing the point of fast_redraw()'s blitting.
-    # This widget's own artists are in anim_artists and get blitted there.
-    sld.drawon = False
-    btn_restart = Button(rax, "|<< Restart")
-    btn_prev = Button(lax, "Step <")
-    btn_play = Button(pax, "Play")
-    btn_next = Button(nax, "Step >")
-
-    n_frames = len(frame_times)
-    state = {"playing": False, "timer": None, "i": 0}
-    # Everything that needs to visually update every frame: the 3D mesh +
-    # HUD text, the telemetry cursor lines, AND the slider's own bar/handle/
-    # value-label. That last part matters: Slider.set_val() schedules its
-    # own redraw via a DEFERRED canvas.draw_idle() call, entirely decoupled
-    # from whatever draws the rest of the figure - during fast playback
-    # those deferred redraws get coalesced by the GUI event loop and lag
-    # behind everything else, which is exactly "the slider doesn't animate
-    # with the rest of the program". Blitting the slider's own artists
-    # ourselves, in the same immediate pass as the mesh/cursors, keeps it
-    # in lockstep instead of relying on that separate deferred redraw.
-    # btn_play.label is here too: its "Play"/"Pause" text changes on every
-    # toggle, and with nothing else prompting a redraw of it, a blitted pass
-    # that skipped it would leave the stale label visible indefinitely (the
-    # cached background has the old text baked in).
-    anim_artists = (([mesh, hud] if show_3d else []) + cursors
-                    + [sld.poly, sld._handle, sld.valtext, btn_play.label])
-
-    # A full (non-blit) redraw of this figure - 3D pane + 4 telemetry axes,
-    # each with their own ticks/labels - is drastically slower than the
-    # actual content change per frame would suggest (matplotlib recomputes
-    # axis chrome, tick positions, and font metrics from scratch on every
-    # full draw): ~1000ms/frame measured, regardless of mesh complexity,
-    # vs <1ms/frame once blitting only redraws what actually changed. See
-    # draw()'s explicit do_3d_projection() call above for why blitting is
-    # safe here even with the 3D mesh. Blitting is managed by hand rather
-    # than via FuncAnimation's built-in support so that every kind of update
-    # - play ticks, slider drags, Step/Restart clicks - goes through exactly
-    # one redraw path.
-    use_blit = blit
-    blit_bg = {"data": None}
-
-    def paint_animated():
-        """Draw the animated artists onto whatever is currently on canvas."""
-        for a in anim_artists:
-            a.axes.draw_artist(a)
-        fig.canvas.blit(fig.bbox)
-
-    def on_draw(_event):
-        """Re-establish blitting after ANY full canvas draw.
-
-        Animated artists are skipped by normal draws, so every full redraw
-        leaves the canvas holding exactly the static background we want to
-        cache - and leaves our artists off-screen until we paint them back.
-        Hooking draw_event covers every source of a full redraw with one
-        rule: the GUI's own first paint when the window opens (which is why
-        painting once before show() wasn't enough - a real backend redraws
-        on realize and wiped it, leaving an empty 3D panel and a blank Play
-        button until the user clicked something), window resizes, and the
-        3D axes' mouse-drag rotate/pan/zoom, which ends in its own
-        independent draw_idle() and would otherwise leave our cached
-        background stale enough to snap the camera back on the next update.
-        """
-        if not use_blit:
-            return
-        blit_bg["data"] = fig.canvas.copy_from_bbox(fig.bbox)
-        paint_animated()
-
-    def fast_redraw():
-        if use_blit and blit_bg["data"] is not None:
-            fig.canvas.restore_region(blit_bg["data"])
-            paint_animated()
-        else:
-            fig.canvas.draw_idle()
-
-    if use_blit:
-        for a in anim_artists:
-            a.set_animated(True)
-        fig.canvas.mpl_connect("draw_event", on_draw)
-        fig.canvas.draw()
-
-    def sync_slider(i):
-        sld.eventson = False
-        sld.set_val(frame_times[i])
-        sld.eventson = True
-
-    def goto(i):
-        i = max(0, min(i, n_frames - 1))
-        state["i"] = i
-        draw(frame_times[i])
-        sync_slider(i)
-        fast_redraw()
-
-    def on_slider(val):
-        state["i"] = nearest(frame_times, val)
-        draw(val)
-        fast_redraw()
-    sld.on_changed(on_slider)
-
-    def step():
-        # Paced to elapsed wall-clock time (scaled by `speed`), not a fixed
-        # frame-index increment: if a frame took longer to render than its
-        # nominal 1/fps slot, this jumps straight to where playback should
-        # be *now* instead of drifting into slow motion.
-        elapsed = time.perf_counter() - state["wall_t0"]
-        target_t = state["data_t0"] + elapsed * speed
-        if target_t >= win[1]:
-            stop()
-            goto(n_frames - 1)
-            return
-        i = nearest(frame_times, target_t)
-        if i == state["i"]:
-            return   # nothing new to draw yet
-        state["i"] = i
-        draw(frame_times[i])
-        sync_slider(i)
-        fast_redraw()
-
-    def stop():
-        timer = state.get("timer")
-        if timer is not None:
-            try:
-                timer.stop()
-            except Exception:
-                pass
-            state["timer"] = None
-        state["playing"] = False
-        btn_play.label.set_text("Play")
-        fast_redraw()
-
-    def play():
-        if state["playing"]:
-            return
-        if state["i"] >= n_frames - 1:
-            state["i"] = 0
-        state["playing"] = True
-        btn_play.label.set_text("Pause")
-        state["wall_t0"] = time.perf_counter()
-        state["data_t0"] = frame_times[state["i"]]
-        # A plain backend timer, NOT FuncAnimation: FuncAnimation defers
-        # starting its timer until the next draw_event (it connects _start
-        # to 'draw_event' in its constructor), and every redraw here is a
-        # blit - restore_region/draw_artist/blit - which never emits one. So
-        # the animation was created and then simply never started: Play
-        # appeared to do nothing while the slider, which doesn't depend on
-        # that, worked fine. We already hand-roll blitting, so none of
-        # FuncAnimation's own machinery was buying anything anyway.
-        #
-        # Poll at the intended frame rate, not faster: step() only does real
-        # work once the wall clock has passed the next frame's time.
-        interval_ms = int(round(1000.0 / max(fps, 1)))
-        timer = fig.canvas.new_timer(interval=interval_ms)
-        timer.add_callback(step)
-        timer.start()
-        state["timer"] = timer
-        fast_redraw()
-
-    def toggle_play(_=None):
-        stop() if state["playing"] else play()
-    btn_play.on_clicked(toggle_play)
-
-    def restart(_=None):
-        stop()
-        goto(0)
-    btn_restart.on_clicked(restart)
-
-    def step_prev(_=None):
-        stop()
-        goto(state["i"] - 1)
-    btn_prev.on_clicked(step_prev)
-
-    def step_next(_=None):
-        stop()
-        goto(state["i"] + 1)
-    btn_next.on_clicked(step_next)
-
-    def on_key(event):
-        if event.key == " ":
-            toggle_play()
-        elif event.key == "right":
-            step_next()
-        elif event.key == "left":
-            step_prev()
-        elif event.key in ("r", "home"):
-            restart()
-        elif event.key == "end":
-            stop()
-            goto(n_frames - 1)
-    fig.canvas.mpl_connect("key_press_event", on_key)
-
-    print("Controls: Play/Pause or SPACE | drag slider to scrub | "
-          "Step</Step> or LEFT/RIGHT arrows | Restart or R/Home | End = last frame")
-    plt.show()
-    return fig
+        return export_video(fig, frame_times, draw, content_artists, record, fps)
+    return run_interactive(fig, frame_times, draw, content_artists,
+                           t_end=win[1], fps=fps, speed=speed, blit=blit)

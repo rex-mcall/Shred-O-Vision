@@ -121,3 +121,63 @@ def test_clicking_play_actually_advances_the_clock(tk_backend, tmp_path):
         f"flight clock advanced only {advanced:.2f}s during 1.5s of real event loop - "
         f"Play toggled the label but playback never actually started"
     )
+
+
+def test_clicking_play_advances_both_flights_in_compare_mode(tk_backend):
+    """Compare mode drives the same shared player; guard that Play really
+    advances the synced clock in a real window, not just under Agg."""
+    import os
+    import matplotlib.pyplot as plt
+    from matplotlib.backend_bases import MouseEvent
+    from blueraven_visualizer.render_compare import compare_flights
+
+    fixtures = os.path.join(os.path.dirname(__file__), "fixtures")
+    hr, lr = os.path.join(fixtures, "hr_sample.csv"), os.path.join(fixtures, "lr_sample.csv")
+    seen = {}
+
+    def clock(fig):
+        return float(fig.texts[0].get_text().split()[1])
+
+    def script(fig):
+        play_ax, play_label = _find_button(fig, "Play", "Pause")
+        seen["t_before"] = clock(fig)
+        x, y = play_ax.transAxes.transform((0.5, 0.5))
+        MouseEvent("button_press_event", fig.canvas, x, y, button=1)._process()
+        MouseEvent("button_release_event", fig.canvas, x, y, button=1)._process()
+        seen["label_after"] = play_label.get_text()
+        fig.canvas.start_event_loop(1.5)
+        seen["t_after"] = clock(fig)
+        plt.close(fig)
+
+    def arm(_event):
+        if seen.get("armed"):
+            return
+        seen["armed"] = True
+        fig = plt.gcf()
+        timer = fig.canvas.new_timer(interval=300)
+        timer.single_shot = True
+        timer.add_callback(lambda: script(fig))
+        timer.start()
+        seen["_timer"] = timer
+
+    real_show = plt.show
+
+    def patched_show(*args, **kwargs):
+        plt.gcf().canvas.mpl_connect("draw_event", arm)
+        real_show(*args, **kwargs)
+
+    plt.show = patched_show
+    try:
+        compare_flights(hr, lr, hr, lr, window=(-1.0, 3.0), fps=15, record=None)
+    except Exception as exc:                              # pragma: no cover
+        if type(exc).__name__ == "TclError":
+            pytest.skip(f"Tk failed mid-test in this environment: {exc}")
+        raise
+    finally:
+        plt.show = real_show
+
+    if "t_after" not in seen:                             # pragma: no cover
+        pytest.skip("GUI event loop never delivered the scripted interaction")
+
+    assert seen["label_after"] == "Pause"
+    assert seen["t_after"] - seen["t_before"] > 0.5, "compare-mode Play didn't advance the clock"

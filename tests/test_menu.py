@@ -2,6 +2,8 @@
 tests drive it by mocking both - verifying the question flow and the choices
 it hands back to the CLI, not the actual dialog/terminal behavior."""
 
+import pytest
+
 import blueraven_visualizer.menu as menu
 
 
@@ -10,6 +12,7 @@ def test_menu_all_defaults_skips_lr_and_obj(monkeypatch):
         return "/fake/hr.csv" if "HIGH-RATE" in title else None   # Cancel on LR and OBJ
 
     inputs = iter([
+        "",    # compare with a second flight? -> no
         "",    # display mode -> default (matplotlib)
         "",    # window -> default (entire flight)
         "",    # mark peak? -> default (no)
@@ -41,6 +44,7 @@ def test_menu_picks_lr_and_obj_and_exports(monkeypatch):
         return "/fake/model.obj"
 
     inputs = iter([
+        "",    # compare with a second flight? -> no
         "1",   # display mode -> matplotlib (still first option)
         "3",   # window -> zoom to peak acceleration
         "1",   # mark peak? -> no
@@ -89,7 +93,7 @@ def test_menu_export_filename_gets_the_right_extension_even_without_one(monkeypa
     def fake_pick_file(title, *a, **k):
         return "/fake/hr.csv" if "HIGH-RATE" in title else None
 
-    inputs = iter(["", "", "", "2", "1", "my_clip"])   # export, mp4, no extension typed
+    inputs = iter(["", "", "", "", "2", "1", "my_clip"])   # export, mp4, no extension typed
     monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
     monkeypatch.setattr(menu, "pick_file", fake_pick_file)
 
@@ -102,7 +106,7 @@ def test_menu_export_filename_wrong_extension_gets_corrected(monkeypatch):
     def fake_pick_file(title, *a, **k):
         return "/fake/hr.csv" if "HIGH-RATE" in title else None
 
-    inputs = iter(["", "", "", "2", "2", "clip.mp4"])   # export, GIF chosen, but typed .mp4
+    inputs = iter(["", "", "", "", "2", "2", "clip.mp4"])   # export, GIF chosen, but typed .mp4
     monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
     monkeypatch.setattr(menu, "pick_file", fake_pick_file)
 
@@ -137,7 +141,49 @@ def test_menu_can_still_ask_for_the_entire_recording(monkeypatch):
     def fake_pick_file(title, *a, **k):
         return "/fake/hr.csv" if "HIGH-RATE" in title else None
 
-    inputs = iter(["", "2", "", ""])              # window -> entire recording
+    inputs = iter(["", "", "2", "", ""])              # window -> entire recording
     monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
     monkeypatch.setattr(menu, "pick_file", fake_pick_file)
     assert menu.run_menu()["window"] == "full"
+
+
+# --- two-flight comparison ---
+
+def test_menu_compare_collects_a_second_flight(monkeypatch):
+    from blueraven_visualizer.render_compare import SAME_AS_A
+    picks = iter(["/a/hr.csv", "/a/lr.csv", None,          # flight A: HR, LR, OBJ (cancel)
+                  "/b/hr.csv", "/b/lr.csv", None])         # flight B: HR, LR, OBJ (cancel)
+    monkeypatch.setattr(menu, "pick_file", lambda *a, **k: next(picks))
+    inputs = iter(["2", "", ""])                           # compare -> yes, window, watch
+    monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
+
+    c = menu.run_menu()
+
+    assert (c["hr_csv"], c["lr_csv"], c["obj"]) == ("/a/hr.csv", "/a/lr.csv", None)
+    assert c["compare"] == {"hr_csv": "/b/hr.csv", "lr_csv": "/b/lr.csv", "obj": SAME_AS_A}
+    assert c["window"] is None and c["record"] is None
+
+
+def test_menu_compare_asks_again_for_a_skipped_first_lr(monkeypatch):
+    picks = iter(["/a/hr.csv", None, None,                 # flight A LR skipped at first
+                  "/a/lr.csv",                              # ...asked again once comparing
+                  "/b/hr.csv", "/b/lr.csv", "/b/model.obj"])
+    monkeypatch.setattr(menu, "pick_file", lambda *a, **k: next(picks))
+    inputs = iter(["2", "2", "2", "1", ""])               # compare, full, export, mp4, default name
+    monkeypatch.setattr("builtins.input", lambda *a: next(inputs))
+
+    c = menu.run_menu()
+
+    assert c["lr_csv"] == "/a/lr.csv"
+    assert c["compare"]["obj"] == "/b/model.obj"
+    assert c["window"] == "full"
+    assert c["record"] == "blueraven_clip.mp4"
+
+
+def test_menu_compare_exits_cleanly_without_a_second_flight(monkeypatch):
+    picks = iter(["/a/hr.csv", "/a/lr.csv", None, None])   # cancel flight B's HR
+    monkeypatch.setattr(menu, "pick_file", lambda *a, **k: next(picks))
+    monkeypatch.setattr("builtins.input", lambda *a: "2")
+    with pytest.raises(SystemExit) as exc:
+        menu.run_menu()
+    assert exc.value.code == 0

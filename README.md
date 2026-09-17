@@ -13,6 +13,7 @@ Replay any flight from the rocket's own point of view - a clean nominal flight o
 - Auto-detects liftoff, burnout, apogee, drogue/main-charge fire, peak acceleration (max thrust on a nominal flight; the break on a failure) and peak angular rate, and marks them on every plot.
 - Prints a console flight report summarizing every detected event plus max velocity/Mach and peak altitude - data only, no interpretation. Max velocity is taken over the ascent, and Mach is reported at that same instant: the Blue Raven's inertial velocities drift badly once the airframe is tumbling or under canopy, so a whole-flight maximum reports descent noise as flight performance.
 - Interactive playback (Play/Pause, Step◀/▶, Restart, drag-to-scrub, keyboard shortcuts) is paced to the wall clock, so it tracks real time (at `--speed 1`, the default) even if a frame takes longer to render than its nominal slot - it catches up rather than falling into slow motion. The matplotlib backend blits (redraws only what changed - the mesh, cursors, and the slider itself - instead of the whole figure, ticks and all, every frame), measured at ~450 ms per interaction before, ~16 ms after. Exports a real-time-accurate MP4/GIF for sharing.
+- **Compare two flights side by side**, synced at liftoff, each with a live altitude and Mach readout - see [Compare two flights](#compare-two-flights-side-by-side).
 - Two rendering backends — pick whichever fits what you need:
 
   | | `--renderer matplotlib` (default) | `--renderer pyvista` |
@@ -99,6 +100,33 @@ from blueraven_visualizer import visualize
 visualize("HR.csv", "LR.csv", obj="my_rocket.obj", record="flight.mp4")
 visualize("HR.csv", "LR.csv", obj="my_rocket.obj", window="peak", highlight_peak=True)
 ```
+
+## Compare two flights side by side
+
+Play two flights next to each other, synced at liftoff. Each gets its own spinning 3D rocket with a HUD showing that flight's **log time**, **barometric altitude** and **Mach number**, and a shared clock above both reads **T+ seconds since liftoff**. One set of playback controls drives both, and the two camera views are linked - rotate one and the other follows, so both rockets are always seen from the same angle.
+
+```bash
+blueraven-visualizer HR_A.csv LR_A.csv --compare HR_B.csv LR_B.csv --obj my_rocket.obj
+
+# different model for the second flight, custom names, exported
+blueraven-visualizer HR_A.csv LR_A.csv --obj a.obj --compare HR_B.csv LR_B.csv --obj-b b.obj \
+    --label-a "IREC 2026" --label-b "Kansas 2024" --record comparison.mp4
+```
+
+Or run the wizard and answer **Yes** to *"Compare this flight side by side with a second one?"* after picking the first flight's files.
+
+```python
+from blueraven_visualizer import compare_flights
+compare_flights("HR_A.csv", "LR_A.csv", "HR_B.csv", "LR_B.csv", obj_a="my_rocket.obj")
+```
+
+What to know:
+
+- **Both flights need their LR file** - altitude and Mach come from it.
+- **Syncing uses each file's own `Liftoff` flag**, not an assumption that its clock starts at liftoff. Current Blue Raven exports do zero the clock there, so each flight's log time will normally match the shared T+; the flag keeps the comparison correct for a log that doesn't.
+- **Mach is shown up to each flight's own apogee, then `--`.** The Blue Raven's inertial velocity drifts once the airframe is tumbling or under canopy - every flight checked reports Mach 2-4 at its final sample, while landing - so a live readout through the descent would present that drift as performance. Blanking at the flight computer's own `Apogee` flag uses its call rather than a guess. It **won't** catch drift that begins mid-ascent after a breakup, so treat Mach readings after a structural failure with suspicion.
+- **Default window: launch through the *later* of the two apogees**, so both ascents play out in full. `--window full` plays both entire recordings; `--window t0,t1` is in seconds since liftoff. `--window peak` isn't available here, since the two flights peak at different moments. When one flight's data runs out first, its HUD says `(end of data)`.
+- Uses the matplotlib renderer (`--renderer pyvista` isn't supported for comparisons).
 
 ## Try it on the bundled example
 

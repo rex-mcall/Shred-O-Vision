@@ -35,6 +35,17 @@ def build_parser():
                           "(omit -> dialog, Cancel there also skips it)")
     ap.add_argument("--menu", action="store_true",
                      help="run the guided, plain-language wizard instead of using flags")
+    ap.add_argument("--compare", nargs=2, metavar=("HR_B", "LR_B"), default=None,
+                     help="play a second flight side by side with the first, synced at "
+                          "liftoff, each showing its altitude and Mach number. Both flights "
+                          "need their LR file.")
+    ap.add_argument("--obj-b", default=None,
+                     help="[--compare] OBJ model for the second flight; 'none' = built-in "
+                          "glyph. Default: the same model as the first flight.")
+    ap.add_argument("--label-a", default=None,
+                     help="[--compare] name shown for the first flight (default: from its filename)")
+    ap.add_argument("--label-b", default=None,
+                     help="[--compare] name shown for the second flight (default: from its filename)")
     ap.add_argument("--obj", default=ASK, help="OBJ model; 'none' = built-in glyph (omit -> dialog)")
     ap.add_argument("--renderer", choices=["matplotlib", "pyvista"], default="matplotlib",
                      help="matplotlib (default, no extra deps, full telemetry dashboard) or "
@@ -71,6 +82,19 @@ def build_parser():
     return ap
 
 
+def _run_compare(hr_a, lr_a, obj_a, compare, window, record, **options):
+    """Dispatch a two-flight comparison. ``compare`` is a dict with the second
+    flight's hr_csv / lr_csv / obj, where obj may be SAME_AS_A."""
+    from .dialogs import resolve_files
+    from . import render_compare
+    hr_a, lr_a, obj_a = resolve_files(hr_a, lr_a, obj_a)
+    render_compare.compare_flights(
+        hr_a, lr_a, compare["hr_csv"], compare["lr_csv"],
+        obj_a=obj_a, obj_b=compare.get("obj", render_compare.SAME_AS_A),
+        label_a=compare.get("label_a"), label_b=compare.get("label_b"),
+        window=window, record=record, **options)
+
+
 def _run(hr_csv, lr_csv, obj, renderer, window, record, **matplotlib_only):
     if renderer == "pyvista":
         from . import render_pyvista as backend
@@ -90,6 +114,10 @@ def main(argv=None):
     if not argv or "--menu" in argv:
         from .menu import run_menu
         choices = run_menu()
+        if choices.get("compare"):
+            _run_compare(choices["hr_csv"], choices["lr_csv"], choices["obj"],
+                         choices["compare"], choices["window"], choices["record"])
+            return
         _run(choices["hr_csv"], choices["lr_csv"], choices["obj"], choices["renderer"],
              choices["window"], choices["record"],
              highlight_peak=choices["highlight_peak"])
@@ -108,6 +136,28 @@ def main(argv=None):
         max_faces = None
     else:
         max_faces = a.max_faces
+
+    if a.compare:
+        # Refuse single-flight-only options rather than silently ignoring them.
+        if a.renderer == "pyvista":
+            ap.error("--compare uses the matplotlib renderer; drop --renderer pyvista")
+        if a.no_3d:
+            ap.error("--no-3d doesn't apply to --compare, which is two 3D views")
+        if a.highlight_peak:
+            ap.error("--highlight-peak doesn't apply to --compare")
+        if lr_csv is None:
+            ap.error("--compare needs the first flight's LR file too - altitude and Mach come from it")
+        from .render_compare import SAME_AS_A
+        compare = {"hr_csv": a.compare[0], "lr_csv": a.compare[1],
+                   "obj": SAME_AS_A if a.obj_b is None else _parse_optional(a.obj_b),
+                   "label_a": a.label_a, "label_b": a.label_b}
+        _run_compare(a.hr_csv, lr_csv, obj, compare, window, a.record,
+                     model_nose=a.model_nose, fps=a.fps, speed=a.speed,
+                     max_faces=max_faces, dpi=a.dpi, blit=not a.no_blit)
+        return
+    for flag, value in (("--obj-b", a.obj_b), ("--label-a", a.label_a), ("--label-b", a.label_b)):
+        if value is not None:
+            ap.error(f"{flag} only applies together with --compare")
 
     _run(a.hr_csv, lr_csv, obj, a.renderer, window, a.record,
          pad=a.pad, model_nose=a.model_nose, fps=a.fps, speed=a.speed,

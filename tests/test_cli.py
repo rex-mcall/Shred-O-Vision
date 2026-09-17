@@ -1,3 +1,5 @@
+import pytest
+
 import blueraven_visualizer.cli as cli
 
 
@@ -56,3 +58,61 @@ def test_window_shred_passthrough_vs_range_parsing():
     assert cli._parse_window("shred") == "shred"   # back-compat alias
     assert cli._parse_window(None) is None
     assert cli._parse_window("1.5,3.0") == [1.5, 3.0]
+
+
+# --- two-flight comparison ---
+
+def test_compare_flag_dispatches_both_flights(monkeypatch):
+    from blueraven_visualizer.render_compare import SAME_AS_A
+    calls = {}
+    monkeypatch.setattr(cli, "_run_compare", lambda *a, **k: calls.update(args=a, kwargs=k))
+
+    cli.main(["hr_a.csv", "lr_a.csv", "--obj", "none", "--compare", "hr_b.csv", "lr_b.csv",
+              "--label-b", "Kansas", "--record", "cmp.mp4"])
+
+    hr_a, lr_a, obj_a, compare, window, record = calls["args"]
+    assert (hr_a, lr_a, obj_a) == ("hr_a.csv", "lr_a.csv", None)
+    assert (compare["hr_csv"], compare["lr_csv"]) == ("hr_b.csv", "lr_b.csv")
+    assert compare["obj"] is SAME_AS_A          # default: reuse flight A's model
+    assert compare["label_b"] == "Kansas"
+    assert record == "cmp.mp4"
+
+
+def test_compare_obj_b_none_means_the_built_in_glyph(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli, "_run_compare", lambda *a, **k: calls.update(args=a))
+    cli.main(["a.csv", "b.csv", "--obj", "none", "--compare", "c.csv", "d.csv", "--obj-b", "none"])
+    assert calls["args"][3]["obj"] is None
+
+
+@pytest.mark.parametrize("extra", [["--renderer", "pyvista"], ["--no-3d"], ["--highlight-peak"]])
+def test_compare_refuses_single_flight_only_options(monkeypatch, extra):
+    monkeypatch.setattr(cli, "_run_compare", lambda *a, **k: pytest.fail("should not dispatch"))
+    with pytest.raises(SystemExit):
+        cli.main(["a.csv", "b.csv", "--obj", "none", "--compare", "c.csv", "d.csv", *extra])
+
+
+def test_compare_needs_the_first_flights_lr_file(monkeypatch):
+    monkeypatch.setattr(cli, "_run_compare", lambda *a, **k: pytest.fail("should not dispatch"))
+    with pytest.raises(SystemExit):
+        cli.main(["a.csv", "none", "--obj", "none", "--compare", "c.csv", "d.csv"])
+
+
+@pytest.mark.parametrize("flag", ["--obj-b", "--label-a", "--label-b"])
+def test_compare_only_options_are_rejected_without_compare(monkeypatch, flag):
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: pytest.fail("should not dispatch"))
+    with pytest.raises(SystemExit):
+        cli.main(["a.csv", "b.csv", "--obj", "none", flag, "x"])
+
+
+def test_menu_compare_choice_dispatches_to_compare(monkeypatch):
+    called = {}
+    monkeypatch.setattr("blueraven_visualizer.menu.run_menu", lambda: {
+        "hr_csv": "a", "lr_csv": "b", "obj": None, "renderer": "matplotlib",
+        "window": None, "record": None, "highlight_peak": False,
+        "compare": {"hr_csv": "c", "lr_csv": "d", "obj": None},
+    })
+    monkeypatch.setattr(cli, "_run_compare", lambda *a, **k: called.update(compare=a))
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: called.update(single=True))
+    cli.main([])
+    assert "compare" in called and "single" not in called
