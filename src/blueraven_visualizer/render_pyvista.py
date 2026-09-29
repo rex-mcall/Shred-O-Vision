@@ -23,7 +23,7 @@ from .io import load_blueraven
 from .quaternion import quat_rotmat, align_rotation, nose_vec, pose_rotation
 from .mesh import (rocket_primitive, glyph_face_colors, detect_nose_axis,
                    warn_if_partial_model)
-from .events import nearest, detect_peak_accel
+from .events import nearest, detect_peak_accel, detect_roll_axis
 from .report import build_report
 
 try:
@@ -157,7 +157,7 @@ def _load_textured_actors(plotter, obj_path):
 
 
 def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
-              model_nose="auto", upright_start=True, highlight_peak=False,
+              model_nose="auto", roll_axis="auto", upright_start=True, highlight_peak=False,
               fps=30, speed=1.0, record=None, off_screen=None):
 
     hr_csv, _, obj = resolve_files(hr_csv, None, obj)
@@ -170,6 +170,13 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     accel_mag = np.linalg.norm(acc, axis=1)
     gyro_mag = np.linalg.norm(np.c_[hc("Gyro_X"), hc("Gyro_Y"), hc("Gyro_Z")], axis=1)
     t_peak_g, gPk, _ = detect_peak_accel(t_hr, accel_mag)
+    if roll_axis == "auto":
+        roll_axis = detect_roll_axis(t_hr, acc)
+        if roll_axis != "+x":
+            print(f"Flight computer is mounted with body {roll_axis} toward the nose "
+                  f"(detected from the accelerometer; the standard mounting is +x). "
+                  f"Override with --roll-axis if the rocket looks wrong.")
+    nose_body = nose_vec(roll_axis)
     print(build_report(t_hr, accel_mag, gyro_mag))
 
     if window in ("peak", "shred"):
@@ -197,7 +204,7 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
         V = V - V.mean(0)
         if model_nose == "auto":
             model_nose = detect_nose_axis(V)
-        V = (align_rotation(nose_vec(model_nose), [1, 0, 0]) @ V.T).T
+        V = (align_rotation(nose_vec(model_nose), nose_body) @ V.T).T
         faces = np.hstack([np.full((len(F), 1), 3), F]).astype(np.int64)
         poly = pv.PolyData(V, faces)
         face_colors_normal = (glyph_face_colors(parts) * 255).astype(np.uint8)
@@ -233,9 +240,9 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
                   f"(override with --model-nose if the rocket looks mis-oriented).")
             if all_pts is not None:
                 warn_if_partial_model(all_pts, model_nose)
-        model_align = align_rotation(nose_vec(model_nose), [1, 0, 0])
+        model_align = align_rotation(nose_vec(model_nose), nose_body)
 
-    v0 = quat_rotmat(Q[nearest(t_hr, win[0])]) @ np.array([1.0, 0, 0])
+    v0 = quat_rotmat(Q[nearest(t_hr, win[0])]) @ nose_body
     Rworld = align_rotation(v0, [0, 0, 1]) if upright_start else np.eye(3)
 
     # ---- camera: fixed, locked, side-on-with-elevation (matches the
@@ -287,7 +294,7 @@ def visualize(hr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             poly.cell_data["colors"] = (face_colors_highlight if post
                                         else face_colors_normal)
         tilt_now = np.degrees(np.arccos(
-            np.clip(np.dot(quat_rotmat(Q[ih]) @ [1, 0, 0], v0), -1, 1)))
+            np.clip(np.dot(quat_rotmat(Q[ih]) @ nose_body, v0), -1, 1)))
         plotter.add_text(
             f"T+{tf:5.2f} s\ntilt {tilt_now:3.0f} deg\nspin {gyro_mag[ih]:4.0f} deg/s"
             + ("\nPAST PEAK G" if post else ""),

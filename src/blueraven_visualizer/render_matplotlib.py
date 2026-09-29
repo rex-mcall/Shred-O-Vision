@@ -27,16 +27,29 @@ from .mesh import (
     angular_roll_marker, solid_color_with_marker, detect_nose_axis,
     warn_if_partial_model,
 )
-from .events import first_true_time, nearest, detect_peak_accel
+from .events import first_true_time, nearest, detect_peak_accel, detect_roll_axis
 from .report import build_report
 from .playback import export_video, run_interactive, validate_record_path
 
 BASE_COLOR = (0.78, 0.80, 0.90)
+
+
+def _resolve_roll_axis(roll_axis, t_hr, accel):
+    """'auto' -> detected from the accelerometer; say so when it isn't the
+    standard mounting, since that changes how the whole flight is drawn."""
+    if roll_axis != "auto":
+        return roll_axis
+    detected = detect_roll_axis(t_hr, accel)
+    if detected != "+x":
+        print(f"Flight computer is mounted with body {detected} toward the nose "
+              f"(detected from the accelerometer; the standard mounting is +x). "
+              f"Override with --roll-axis if the rocket looks wrong.")
+    return detected
 HIGHLIGHT_COLOR = (0.85, 0.06, 0.10)
 
 
 def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
-              model_nose="auto", upright_start=True, highlight_peak=False,
+              model_nose="auto", roll_axis="auto", upright_start=True, highlight_peak=False,
               fps=30, speed=1.0, record=None, decim_plot=5,
               show_3d=True, max_faces="auto", dpi=100, blit=True):
 
@@ -68,6 +81,8 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     gyro_mag = np.linalg.norm(np.c_[hc("Gyro_X"), hc("Gyro_Y"), hc("Gyro_Z")], axis=1)
 
     t_peak_g, gPk, iPk = detect_peak_accel(t_hr, accel_mag)
+    roll_axis = _resolve_roll_axis(roll_axis, t_hr, acc)
+    nose_body = nose_vec(roll_axis)
     events = {"peak g": t_peak_g}
 
     lc = None
@@ -144,8 +159,12 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
     # own long axis instead, which works on any mesh regardless of what its
     # geometry actually represents.
     roll_marker = angular_roll_marker(V, F) if parts is None else None
+    # Everything above is built nose-along-+X (the roll marker is measured
+    # about +X). Now carry the model into the flight computer's frame so its
+    # nose lies along whichever board axis actually points out the nose.
+    V = (align_rotation([1, 0, 0], nose_body) @ V.T).T
 
-    v0 = quat_rotmat(Q[nearest(t_hr, win[0])]) @ np.array([1.0, 0, 0])
+    v0 = quat_rotmat(Q[nearest(t_hr, win[0])]) @ nose_body
     Rworld = align_rotation(v0, [0, 0, 1]) if upright_start else np.eye(3)
 
     # ---- figure layout ----
@@ -287,7 +306,7 @@ def visualize(hr_csv=ASK, lr_csv=ASK, obj=ASK, *, window=None, pad=1.5,
             if ax3d.M is not None:
                 mesh.do_3d_projection()
             tilt_now = np.degrees(np.arccos(
-                np.clip(np.dot(quat_rotmat(Q[ih]) @ [1, 0, 0], v0), -1, 1)))
+                np.clip(np.dot(quat_rotmat(Q[ih]) @ nose_body, v0), -1, 1)))
             hud.set_text(f"T+{tf:5.2f} s\ntilt {tilt_now:3.0f} deg\n"
                          f"spin {gyro_mag[ih]:4.0f} deg/s"
                          + ("\n--- PAST PEAK G ---" if post else ""))
