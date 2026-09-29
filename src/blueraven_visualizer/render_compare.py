@@ -34,7 +34,7 @@ from .mesh import (
     angular_roll_marker, solid_color_with_marker, detect_nose_axis,
     warn_if_partial_model,
 )
-from .events import first_true_time
+from .events import first_true_time, detect_roll_axis
 from .atmosphere import mach_number
 from .report import build_report
 from .playback import export_video, run_interactive, validate_record_path, nearest_index
@@ -65,7 +65,7 @@ def flight_label(path):
 class Flight:
     """One flight's data, with times available both as logged and synced."""
 
-    def __init__(self, hr_csv, lr_csv, label=None):
+    def __init__(self, hr_csv, lr_csv, label=None, roll_axis="auto"):
         if lr_csv is None:
             raise ValueError(
                 "Comparing flights needs each flight's LOW-RATE (LR) file too - the "
@@ -85,6 +85,17 @@ class Flight:
         gyr = np.c_[hc("Gyro_X"), hc("Gyro_Y"), hc("Gyro_Z")][ok]
         self.accel_mag = np.linalg.norm(acc, axis=1)
         self.gyro_mag = np.linalg.norm(gyr, axis=1)
+
+        # Which board axis points out the nose - detected per flight, since two
+        # teams' boards can be mounted differently (see events.detect_roll_axis).
+        if roll_axis == "auto":
+            roll_axis = detect_roll_axis(self.t_hr, acc)
+            if roll_axis != "+x":
+                self.notes.append(f"flight computer is mounted with body {roll_axis} toward "
+                                  f"the nose (detected from the accelerometer; the standard "
+                                  f"mounting is +x)")
+        self.roll_axis = roll_axis
+        self.nose_body = nose_vec(roll_axis)
 
         _, lc = load_blueraven(lr_csv)
         self._lc = lc
@@ -115,31 +126,60 @@ class Flight:
         if len(self.t_hr) == 0 or len(self.t_lr) == 0:
             raise ValueError(f"{self.label}: no usable samples in the HR or LR file.")
 
-        # Span where BOTH files have data, in synced (since-liftoff) time.
-        self.start = max(self.t_hr[0], self.t_lr[0]) - self.liftoff
-        self.end = min(self.t_hr[-1], self.t_lr[-1]) - self.liftoff
+        # Span where EITHER file has data, in synced (since-liftoff) time. The
+        # two logs don't end together: the 500 Hz attitude log stops long before
+        # the 50 Hz one on a long flight (Sunrise 2024: HR ends at 106 s, LR runs
+        # to 357 s). Stopping at the earlier one silently dropped 251 s of that
+        # flight's recorded descent. Past the end of the attitude log the rocket
+        # holds its last pose and the HUD says so, while altitude keeps updating.
+        self.start = min(self.t_hr[0], self.t_lr[0]) - self.liftoff
+        self.end = max(self.t_hr[-1], self.t_lr[-1]) - self.liftoff
         self.apogee_sync = self.apogee - self.liftoff if not np.isnan(self.apogee) else np.nan
-        # Tolerance for "is this instant inside the data": half an LR sample.
-        self._tol = 0.5 * float(np.median(np.diff(self.t_lr))) if len(self.t_lr) > 1 else 0.0
+        # Tolerance for "is this instant inside a log": half a sample of it.
+        self._tol_lr = 0.5 * float(np.median(np.diff(self.t_lr))) if len(self.t_lr) > 1 else 0.0
+        self._tol_hr = 0.5 * float(np.median(np.diff(self.t_hr))) if len(self.t_hr) > 1 else 0.0
 
     def report(self):
         return build_report(self.t_hr, self.accel_mag, self.gyro_mag,
                             t_lr=self.t_lr, lc=self._lc)
 
+    def _in(self, t, t_log, tol):
+        return t[0] - tol <= t_log <= t[-1] + tol
+
     def sample(self, t_sync):
         """Everything the HUD shows at synced time ``t_sync``."""
         t_log = t_sync + self.liftoff
-        before = t_sync < self.start - self._tol
-        after = t_sync > self.end + self._tol
+        tol = max(self._tol_lr, self._tol_hr)
+        before = t_sync < self.start - tol
+        after = t_sync > self.end + tol
+        lr_live = self._in(self.t_lr, t_log, self._tol_lr)
+        hr_live = self._in(self.t_hr, t_log, self._tol_hr)
         il = nearest_index(self.t_lr, t_log)
         return {
             "t_log": t_log,
             "status": "before" if before else ("after" if after else "live"),
             "ih": nearest_index(self.t_hr, t_log),
-            "alt": self.alt[il],
-            "mach": self.mach[il],
+            "hr_live": hr_live,
+            "hr_ended": t_log > self.t_hr[-1] + self._tol_hr,
+            "lr_live": lr_live,
+            "alt": self.alt[il] if lr_live else np.nan,
+            "mach": self.mach[il] if lr_live else np.nan,
             "past_apogee": (not np.isnan(self.apogee)) and t_log > self.apogee,
         }
+
+    # ---- attitude: the same math the renderer draws with ----
+
+    def upright_rotation(self, t_sync):
+        """World rotation that stands this flight's rocket up at ``t_sync``."""
+        i0 = nearest_index(self.t_hr, t_sync + self.liftoff)
+        v0 = quat_rotmat(self.Q[i0]) @ self.nose_body
+        return align_rotation(v0, [0, 0, 1])
+
+    def model_rotation(self, ih, Rworld):
+        """Rotation taking a model built nose-along-+X to where this flight's
+        rocket is at HR sample ``ih``: first into the board's frame (nose along
+        the board's own nose axis), then by the board's logged attitude."""
+        return Rworld @ quat_rotmat(self.Q[ih]) @ align_rotation([1, 0, 0], self.nose_body)
 
 
 def _row(label, value, note=""):
@@ -154,12 +194,21 @@ def hud_text(s):
         rows = [_row("log time", f"{s['t_log']:.2f} s", "(end of data)"),
                 _row("ALTITUDE", "--"), _row("MACH", "--")]
     else:
-        alt = f"{s['alt']:,.0f} ft" if np.isfinite(s["alt"]) else "--"
-        if np.isfinite(s["mach"]):
-            mach = _row("MACH", f"{s['mach']:.2f}")
+        if s.get("hr_live", True):
+            time_note = ""
         else:
-            mach = _row("MACH", "--", "(past apogee)" if s["past_apogee"] else "")
-        rows = [_row("log time", f"{s['t_log']:.2f} s"), _row("ALTITUDE", alt), mach]
+            time_note = "(attitude log ended)" if s.get("hr_ended") else "(no attitude yet)"
+        if not s.get("lr_live", True):
+            alt_row = _row("ALTITUDE", "--", "(no altitude data)")
+            mach = _row("MACH", "--")
+        else:
+            alt = f"{s['alt']:,.0f} ft" if np.isfinite(s["alt"]) else "--"
+            alt_row = _row("ALTITUDE", alt)
+            if np.isfinite(s["mach"]):
+                mach = _row("MACH", f"{s['mach']:.2f}")
+            else:
+                mach = _row("MACH", "--", "(past apogee)" if s["past_apogee"] else "")
+        rows = [_row("log time", f"{s['t_log']:.2f} s", time_note), alt_row, mach]
     return "\n".join(rows)
 
 
@@ -212,11 +261,14 @@ def _build_model(obj, max_faces, model_nose, label):
 
 def compare_flights(hr_a, lr_a, hr_b, lr_b, *, obj_a=None, obj_b=SAME_AS_A,
                     label_a=None, label_b=None, window=None, fps=30, speed=1.0,
-                    record=None, model_nose="auto", upright_start=True,
+                    record=None, model_nose="auto", roll_axis_a="auto",
+                    roll_axis_b="auto", upright_start=True,
                     max_faces="auto", dpi=100, blit=True):
     """Play two flights side by side, synced at liftoff.
 
     ``obj_b`` defaults to flight A's model; pass None for the built-in glyph.
+    ``roll_axis_a`` / ``roll_axis_b``: which flight-computer axis points out
+    each rocket's nose; "auto" detects each from its own accelerometer.
     ``window`` is in seconds since liftoff: None (launch through the later
     apogee), ``"full"``, or ``(t0, t1)``.
     """
@@ -226,8 +278,8 @@ def compare_flights(hr_a, lr_a, hr_b, lr_b, *, obj_a=None, obj_b=SAME_AS_A,
         # Two meshes share each frame's budget.
         max_faces = 25000 if record else 5000
 
-    fa = Flight(hr_a, lr_a, label_a)
-    fb = Flight(hr_b, lr_b, label_b)
+    fa = Flight(hr_a, lr_a, label_a, roll_axis=roll_axis_a)
+    fb = Flight(hr_b, lr_b, label_b, roll_axis=roll_axis_b)
     if fa.label == fb.label:
         fa.label, fb.label = f"{fa.label} (A)", f"{fb.label} (B)"
     for tag, f in (("A", fa), ("B", fb)):
@@ -267,10 +319,9 @@ def compare_flights(hr_a, lr_a, hr_b, lr_b, *, obj_a=None, obj_b=SAME_AS_A,
         ax.view_init(elev=16, azim=-60)
         ax.set_title(f"Flight {'AB'[k]}: {f.label}", fontsize=12)
 
+        Rworld = f.upright_rotation(win[0]) if upright_start else np.eye(3)
         i0 = nearest_index(f.t_hr, win[0] + f.liftoff)
-        v0 = quat_rotmat(f.Q[i0]) @ np.array([1.0, 0, 0])
-        Rworld = align_rotation(v0, [0, 0, 1]) if upright_start else np.eye(3)
-        up = Rworld @ v0 * Rmax * 1.05
+        up = Rworld @ quat_rotmat(f.Q[i0]) @ f.nose_body * Rmax * 1.05
         ax.plot([0, up[0]], [0, up[1]], [0, up[2]], "--", color="0.6", lw=1)
 
         hud = ax.text2D(0.02, 0.97, "", transform=ax.transAxes, va="top",
@@ -282,7 +333,7 @@ def compare_flights(hr_a, lr_a, hr_b, lr_b, *, obj_a=None, obj_b=SAME_AS_A,
         for p in panels:
             f, V, F = p["flight"], p["model"]["V"], p["model"]["F"]
             s = f.sample(ts)
-            Vk = (p["Rworld"] @ quat_rotmat(f.Q[s["ih"]]) @ V.T).T
+            Vk = (f.model_rotation(s["ih"], p["Rworld"]) @ V.T).T
             tri = Vk[F]
             p["mesh"].set_verts(tri)
             p["mesh"].set_facecolor(shade_triangles(p["model"]["colors"], tri))

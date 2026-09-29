@@ -116,3 +116,35 @@ def test_menu_compare_choice_dispatches_to_compare(monkeypatch):
     monkeypatch.setattr(cli, "_run", lambda *a, **k: called.update(single=True))
     cli.main([])
     assert "compare" in called and "single" not in called
+
+
+def test_compare_passes_each_flights_roll_axis(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli, "_run_compare", lambda *a, **k: calls.update(kwargs=k))
+    cli.main(["a.csv", "b.csv", "--obj", "none", "--compare", "c.csv", "d.csv",
+              "--roll-axis", "+y", "--roll-axis-b", "-z"])
+    assert calls["kwargs"]["roll_axis_a"] == "+y"
+    assert calls["kwargs"]["roll_axis_b"] == "-z"
+
+    cli.main(["a.csv", "b.csv", "--obj", "none", "--compare", "c.csv", "d.csv"])
+    assert calls["kwargs"]["roll_axis_a"] == "auto"
+    assert calls["kwargs"]["roll_axis_b"] == "auto"
+
+
+def test_roll_axis_b_needs_compare(monkeypatch):
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: pytest.fail("should not dispatch"))
+    with pytest.raises(SystemExit):
+        cli.main(["a.csv", "b.csv", "--obj", "none", "--roll-axis-b", "+y"])
+
+
+@pytest.mark.parametrize("flag,value", [("--roll-axis", "-y"), ("--model-nose", "-z"),
+                                        ("--roll-axis", "+y")])
+def test_negative_axis_values_parse_as_written(monkeypatch, flag, value):
+    """Regression guard: argparse read `-y` as the next option, so
+    `--roll-axis -y` (the spelling the README suggests) failed with
+    "expected one argument"."""
+    calls = {}
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: calls.update(kwargs=k))
+    cli.main(["a.csv", "b.csv", "--obj", "none", flag, value])
+    key = "roll_axis" if flag == "--roll-axis" else "model_nose"
+    assert calls["kwargs"][key] == value

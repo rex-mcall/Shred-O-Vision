@@ -277,3 +277,65 @@ def test_cameras_are_linked():
         assert (ax_b.elev, ax_b.azim) == (40, 10)
     finally:
         plt.close(fig)
+
+
+# ---------------------------------------------------------------- logs that end at different times
+
+def _short_hr_flight(tmp_path, hr_until=8.0):
+    """HR (attitude) log stops at ``hr_until`` s; LR keeps going to 17 s -
+    the shape of every long real flight (Sunrise 2024: HR 106 s, LR 357 s)."""
+    return Flight(rewrite(HR, tmp_path / "hr_short.csv", keep_until=hr_until),
+                  rewrite(LR, tmp_path / "lr_full.csv"))
+
+
+def test_full_window_runs_to_the_end_of_the_longer_log(tmp_path):
+    """Regression guard: a flight's span used to end where its EARLIER log
+    ended, so --window full silently dropped 251 s of Sunrise's recorded
+    descent despite the README promising both entire recordings."""
+    f = _short_hr_flight(tmp_path)
+    assert f.end == pytest.approx(LR_END, abs=0.02)
+    assert sync_window(f, f, "full")[1] == pytest.approx(LR_END, abs=0.02)
+
+
+def test_an_explicit_window_past_the_attitude_log_is_accepted(tmp_path):
+    f = _short_hr_flight(tmp_path)
+    assert sync_window(f, f, (10.0, 15.0)) == (10.0, 15.0)
+
+
+def test_altitude_stays_live_after_the_attitude_log_ends(tmp_path):
+    f = _short_hr_flight(tmp_path)
+    s = f.sample(12.0)
+    _, lc = load_blueraven(LR)
+    t = lc("Flight_Time_(s)")
+    expected = lc("Baro_Altitude_AGL_(feet)")[int(np.argmin(np.abs(t - 12.0)))]
+    assert s["status"] == "live" and not s["hr_live"]
+    assert s["alt"] == expected
+    text = hud_text(s)
+    assert "(attitude log ended)" in text
+    assert f"{expected:,.0f} ft" in text
+
+
+# ---------------------------------------------------------------- per-flight board mounting
+
+def test_each_flight_gets_its_own_board_mounting(tmp_path):
+    """The same physical flight logged on a board mounted +Y-to-nose must
+    point its rocket the same way as the original at every instant, even with
+    a normally mounted flight alongside it."""
+    from test_roll_axis import remount_y_nose
+
+    a = Flight(HR, LR)
+    b = Flight(remount_y_nose(HR, tmp_path / "hr_y.csv"), LR)
+    assert (a.roll_axis, b.roll_axis) == ("+x", "+y")
+
+    Ra, Rb = a.upright_rotation(0.0), b.upright_rotation(0.0)
+    nose_model = np.array([1.0, 0, 0])            # models are built nose-along-+X
+    for ts in (0.0, 1.0, 2.5, 5.0, 8.0):
+        na = a.model_rotation(a.sample(ts)["ih"], Ra) @ nose_model
+        nb = b.model_rotation(b.sample(ts)["ih"], Rb) @ nose_model
+        np.testing.assert_allclose(nb, na, atol=1e-6)
+
+
+def test_roll_axis_can_be_forced_per_flight(tmp_path):
+    f = Flight(HR, LR, roll_axis="-z")
+    assert f.roll_axis == "-z"
+    assert not any("mounted" in n for n in f.notes)

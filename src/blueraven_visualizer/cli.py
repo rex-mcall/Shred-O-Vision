@@ -23,6 +23,28 @@ def _parse_optional(value, none_word="none"):
     return value
 
 
+_AXIS_OPTIONS = ("--roll-axis", "--roll-axis-b", "--model-nose")
+_NEGATIVE_AXES = ("-x", "-y", "-z")
+
+
+def _join_negative_axis_values(argv):
+    """Let `--roll-axis -y` work as written.
+
+    argparse reads a value that starts with '-' as the next option, so the
+    natural spelling fails with "expected one argument" and only
+    `--roll-axis=-y` worked. Rewrite the few axis options into that form.
+    """
+    out, i = [], 0
+    while i < len(argv):
+        if argv[i] in _AXIS_OPTIONS and i + 1 < len(argv) and argv[i + 1].lower() in _NEGATIVE_AXES:
+            out.append(f"{argv[i]}={argv[i + 1].lower()}")
+            i += 2
+        else:
+            out.append(argv[i])
+            i += 1
+    return out
+
+
 def build_parser():
     ap = argparse.ArgumentParser(
         prog="blueraven-visualizer",
@@ -42,6 +64,10 @@ def build_parser():
     ap.add_argument("--obj-b", default=None,
                      help="[--compare] OBJ model for the second flight; 'none' = built-in "
                           "glyph. Default: the same model as the first flight.")
+    ap.add_argument("--roll-axis-b", default=None,
+                     choices=["auto", "+x", "-x", "+y", "-y", "+z", "-z"],
+                     help="[--compare] --roll-axis for the second flight (default: auto-detected "
+                          "from its own accelerometer; --roll-axis applies to the first)")
     ap.add_argument("--label-a", default=None,
                      help="[--compare] name shown for the first flight (default: from its filename)")
     ap.add_argument("--label-b", default=None,
@@ -131,7 +157,7 @@ def main(argv=None):
         return
 
     ap = build_parser()
-    a = ap.parse_args(argv)
+    a = ap.parse_args(_join_negative_axis_values(argv))
 
     lr_csv = _parse_optional(a.lr_csv)
     obj = _parse_optional(a.obj)
@@ -159,10 +185,12 @@ def main(argv=None):
                    "obj": SAME_AS_A if a.obj_b is None else _parse_optional(a.obj_b),
                    "label_a": a.label_a, "label_b": a.label_b}
         _run_compare(a.hr_csv, lr_csv, obj, compare, window, a.record,
-                     model_nose=a.model_nose, fps=a.fps, speed=a.speed,
+                     model_nose=a.model_nose, roll_axis_a=a.roll_axis,
+                     roll_axis_b=a.roll_axis_b or "auto", fps=a.fps, speed=a.speed,
                      max_faces=max_faces, dpi=a.dpi, blit=not a.no_blit)
         return
-    for flag, value in (("--obj-b", a.obj_b), ("--label-a", a.label_a), ("--label-b", a.label_b)):
+    for flag, value in (("--obj-b", a.obj_b), ("--label-a", a.label_a), ("--label-b", a.label_b),
+                        ("--roll-axis-b", a.roll_axis_b)):
         if value is not None:
             ap.error(f"{flag} only applies together with --compare")
 
