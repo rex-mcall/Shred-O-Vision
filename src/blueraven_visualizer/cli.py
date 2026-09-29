@@ -56,6 +56,13 @@ def build_parser():
                      help="which axis the model's nose points along in its own file "
                           "(+x/-x/+y/-y/+z/-z). Default 'auto' detects it from the "
                           "geometry - only set this if the rocket looks mis-oriented.")
+    ap.add_argument("--roll-axis", default="auto",
+                     choices=["auto", "+x", "-x", "+y", "-y", "+z", "-z"],
+                     help="which axis of the FLIGHT COMPUTER points out the rocket's nose "
+                          "(its roll axis). Default 'auto' reads it from the accelerometer; "
+                          "the standard Blue Raven mounting is +x. Set this if the rocket "
+                          "cartwheels when it should be rolling. (--model-nose is the "
+                          "different question of which way the 3D MODEL file points.)")
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--speed", type=float, default=1.0)
     ap.add_argument("--record", default=None, help="output .mp4/.gif (else interactive)")
@@ -76,7 +83,7 @@ def _run(hr_csv, lr_csv, obj, renderer, window, record, **matplotlib_only):
         from . import render_pyvista as backend
         backend.visualize(hr_csv, obj, window=window, record=record,
                            **{k: v for k, v in matplotlib_only.items()
-                              if k in ("pad", "model_nose", "fps", "speed",
+                              if k in ("pad", "model_nose", "roll_axis", "fps", "speed",
                                        "highlight_peak")})
     else:
         from . import render_matplotlib as backend
@@ -110,7 +117,8 @@ def main(argv=None):
         max_faces = a.max_faces
 
     _run(a.hr_csv, lr_csv, obj, a.renderer, window, a.record,
-         pad=a.pad, model_nose=a.model_nose, fps=a.fps, speed=a.speed,
+         pad=a.pad, model_nose=a.model_nose, roll_axis=a.roll_axis,
+         fps=a.fps, speed=a.speed,
          highlight_peak=a.highlight_peak,
          show_3d=not a.no_3d, max_faces=max_faces,
          dpi=a.dpi, blit=not a.no_blit)
